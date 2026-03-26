@@ -1,0 +1,570 @@
+openapi: 3.0.3
+info:
+  title: Nginx Configuration Manager API
+  description: |
+    REST API for managing Nginx reverse proxy configuration. Supports parsing,
+    serializing, validating, and applying Nginx config files via a JSON AST.
+  version: 1.0.0
+  contact:
+    name: Nginx Config UI
+
+servers:
+  - url: http://localhost:8081
+    description: Default development server
+
+tags:
+  - name: Health
+    description: Health check
+  - name: Config
+    description: Configuration file operations
+  - name: System
+    description: Nginx system operations
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns service health status
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/config:
+    get:
+      tags: [Config]
+      summary: List config files
+      description: |
+        Returns config files from nginx.conf, conf.d/, and sites-available/.
+        For sites-available, status indicates whether a symlink exists in sites-enabled.
+      operationId: listConfigs
+      responses:
+        '200':
+          description: List of config files with path and status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConfigFileInfo'
+              example:
+                files:
+                  - path: nginx.conf
+                    status: enabled
+                  - path: conf.d/default.conf
+                    status: enabled
+                  - path: sites-available/example.com.conf
+                    status: enabled
+                  - path: sites-available/disabled-site.conf
+                    status: disabled
+
+  /api/config/enable:
+    post:
+      tags: [Config]
+      summary: Enable site
+      description: Create symlink in sites-enabled (sites-available files only)
+      operationId: enableConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+                  example: sites-available/example.com.conf
+      responses:
+        '200':
+          description: Site enabled
+        '400':
+          description: Path is not a sites-available file
+
+  /api/config/disable:
+    post:
+      tags: [Config]
+      summary: Disable site
+      description: Remove symlink from sites-enabled (sites-available files only)
+      operationId: disableConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+                  example: sites-available/example.com.conf
+      responses:
+        '200':
+          description: Site disabled
+        '400':
+          description: Path is not a sites-available file
+
+  /api/config/parse:
+    post:
+      tags: [Config]
+      summary: Parse config from content
+      description: Parse Nginx config text or JSON body into JSON AST
+      operationId: parseConfig
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                  description: Raw Nginx config text
+                file_path:
+                  type: string
+                  description: Virtual path for the config (e.g. /etc/nginx/nginx.conf)
+          text/plain:
+            schema:
+              type: string
+              description: Raw Nginx config text
+      responses:
+        '200':
+          description: Parsed ConfigFile JSON AST
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigFile'
+        '400':
+          description: Parse error
+
+  /api/config/serialize:
+    post:
+      tags: [Config]
+      summary: Serialize config to Nginx text
+      description: Convert ConfigFile JSON AST to Nginx configuration text
+      operationId: serializeConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigFile'
+      responses:
+        '200':
+          description: Nginx config as plain text
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Invalid JSON
+
+  /api/config/validate:
+    post:
+      tags: [Config]
+      summary: Validate config content
+      description: Write content to temp file and run nginx -t -c
+      operationId: validateConfig
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: Validation passed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestResponse'
+        '400':
+          description: Validation failed
+
+  /api/config/create:
+    post:
+      tags: [Config]
+      summary: Create new config file
+      description: Create a new blank .conf file in conf.d/
+      operationId: createConfig
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filename:
+                  type: string
+                  example: new-site.conf
+                target_dir:
+                  type: string
+                  enum: [conf.d, sites-available]
+                  default: conf.d
+                  description: Directory for new file (conf.d or sites-available)
+      responses:
+        '200':
+          description: File created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  path:
+                    type: string
+        '400':
+          description: Invalid filename or file exists
+
+  /api/config/{path}:
+    get:
+      tags: [Config]
+      summary: Get config file
+      description: Parse and return specific config file by path (relative to NGINX_CONFIG_ROOT)
+      operationId: getConfig
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+            example: conf.d/default.conf
+      responses:
+        '200':
+          description: ConfigFile JSON AST
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigFile'
+        '400':
+          description: Invalid path
+    put:
+      tags: [Config]
+      summary: Save config file
+      description: Validate and save ConfigFile to disk
+      operationId: saveConfig
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigFile'
+      responses:
+        '200':
+          description: Saved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          description: Validation failed or invalid path
+    delete:
+      tags: [Config]
+      summary: Delete config file
+      description: Remove a config file (cannot delete main nginx.conf)
+      operationId: deleteConfig
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+        '400':
+          description: Invalid path or cannot delete main config
+
+  /api/upstreams:
+    get:
+      tags: [Config]
+      summary: List upstreams
+      description: Extract all upstream blocks for dropdowns
+      operationId: listUpstreams
+      responses:
+        '200':
+          description: List of upstream blocks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UpstreamInfo'
+
+  /api/server:
+    post:
+      tags: [Config]
+      summary: Create server block
+      description: Add a new server block to a config file
+      operationId: createServer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateServerRequest'
+      responses:
+        '200':
+          description: Server block added
+        '400':
+          description: Invalid request
+
+  /api/location:
+    post:
+      tags: [Config]
+      summary: Add location block
+      description: Add a location block to a server
+      operationId: addLocation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddLocationRequest'
+      responses:
+        '200':
+          description: Location block added
+        '400':
+          description: Invalid request
+
+  /api/system/test:
+    post:
+      tags: [System]
+      summary: Test config syntax
+      description: Run nginx -t
+      operationId: testConfig
+      responses:
+        '200':
+          description: Test result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestResponse'
+
+  /api/system/reload:
+    post:
+      tags: [System]
+      summary: Reload Nginx
+      description: Test config first, then systemctl reload nginx
+      operationId: reloadNginx
+      responses:
+        '200':
+          description: Reload successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReloadResponse'
+        '400':
+          description: Config test failed
+
+  /api/stats:
+    get:
+      tags: [Config]
+      summary: Dashboard stats
+      description: Server blocks count, upstreams, config files
+      operationId: getStats
+      responses:
+        '200':
+          description: Stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  server_blocks:
+                    type: integer
+                  upstreams:
+                    type: integer
+                  config_files:
+                    type: integer
+
+  /api/system/status:
+    get:
+      tags: [System]
+      summary: Nginx status
+      description: systemctl is-active nginx
+      operationId: getStatus
+      responses:
+        '200':
+          description: Service status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active:
+                    type: boolean
+                  status:
+                    type: string
+                  last_reload_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  last_error:
+                    type: string
+
+  /api/backup:
+    get:
+      tags: [System]
+      summary: Download backup
+      description: Tar.gz of NGINX_CONFIG_ROOT
+      operationId: backupConfig
+      responses:
+        '200':
+          description: Binary tar.gz file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /api/restore:
+    post:
+      tags: [System]
+      summary: Restore from backup
+      description: Upload tar.gz, extract, and reload
+      operationId: restoreConfig
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Restore successful
+        '400':
+          description: Restore failed
+
+components:
+  schemas:
+    ConfigFileInfo:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Relative path (e.g. conf.d/default.conf, sites-available/example.conf)
+        status:
+          type: string
+          enum: [enabled, disabled]
+          description: For sites-available, indicates symlink presence in sites-enabled
+    ConfigFile:
+      type: object
+      properties:
+        file_path:
+          type: string
+        status:
+          type: string
+          enum: [enabled, disabled]
+        directives:
+          type: array
+          items:
+            $ref: '#/components/schemas/Node'
+    Node:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [directive, block]
+        name:
+          type: string
+        args:
+          type: array
+          items:
+            type: string
+        comment:
+          type: string
+        line_number:
+          type: integer
+        enabled:
+          type: boolean
+        directives:
+          type: array
+          items:
+            $ref: '#/components/schemas/Node'
+    UpstreamInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        file:
+          type: string
+        servers:
+          type: array
+          items:
+            type: string
+    CreateServerRequest:
+      type: object
+      properties:
+        file_path:
+          type: string
+        listen:
+          type: string
+        server_name:
+          type: array
+          items:
+            type: string
+        ssl:
+          type: boolean
+        http2:
+          type: boolean
+        destination:
+          type: string
+        websockets:
+          type: boolean
+    AddLocationRequest:
+      type: object
+      properties:
+        file_path:
+          type: string
+        server_index:
+          type: integer
+        path:
+          type: string
+        match_type:
+          type: string
+          enum: ["", "=", "^~", "~", "~*"]
+        proxy_pass:
+          type: string
+    TestResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        output:
+          type: string
+    ReloadResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string

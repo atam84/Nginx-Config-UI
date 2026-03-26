@@ -1,0 +1,395 @@
+.servers-fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.servers-empty {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.servers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.server-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  background: var(--bg);
+}
+
+.server-card.block-disabled {
+  opacity: 0.7;
+}
+
+.server-card .block-enabled-toggle {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.5rem;
+  cursor: pointer;
+}
+
+.server-card .block-enabled-toggle input {
+  width: auto;
+}
+
+.server-card-header {
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.server-card-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  flex: 1;
+}
+
+.btn-delete-server {
+  font-family: inherit;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--error);
+  cursor: pointer;
+}
+
+.server-field {
+  margin-bottom: 1rem;
+}
+
+.server-field label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.server-field input[type='text'],
+.server-field input[type='number'],
+.server-field select {
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.server-name-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0;
+}
+
+.server-name-tags .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.server-name-tags .tag-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.server-name-tags .tag-remove:hover {
+  color: var(--error, #e74c3c);
+}
+
+.server-name-tags .tag-input {
+  flex: 1;
+  min-width: 120px;
+  max-width: 200px;
+}
+
+.listen-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.listen-row input {
+  width: 80px;
+  max-width: 80px;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.checkbox-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.server-ssl-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.ssl-section-toggle {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0;
+  margin-bottom: 0.75rem;
+}
+
+.ssl-section-toggle:hover {
+  text-decoration: underline;
+}
+
+.ssl-fields {
+  padding-left: 0.5rem;
+}
+
+.ssl-ciphers-custom {
+  margin-top: 0.5rem;
+}
+
+.letsencrypt-note .note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0.25rem 0 0;
+}
+
+.locations-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.locations-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.btn-add-location {
+  font-family: inherit;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.6rem;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btn-add-location:hover {
+  opacity: 0.9;
+}
+
+.locations {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.location-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.location-card.location-disabled {
+  opacity: 0.7;
+}
+
+.location-card:last-child {
+  margin-bottom: 0;
+}
+
+.location-header {
+  margin-bottom: 0.5rem;
+}
+
+.location-toggle {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+  margin-bottom: 0.5rem;
+}
+
+.location-toggle:hover {
+  text-decoration: underline;
+}
+
+.location-path-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.location-path-row select {
+  width: auto;
+  min-width: 100px;
+  max-width: 140px;
+}
+
+.location-path-input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.location-enabled {
+  margin-left: auto;
+}
+
+.btn-remove-location {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.btn-remove-location:hover {
+  color: var(--error, #e74c3c);
+}
+
+.location-fields {
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--border);
+  margin-top: 0.75rem;
+}
+
+.location-field {
+  margin-bottom: 0.75rem;
+}
+
+.location-field label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.3rem;
+}
+
+.location-field input,
+.location-field select {
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.header-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.header-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.header-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.header-row input:first-child {
+  max-width: 180px;
+}
+
+.btn-remove-header {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0 0.25rem;
+  flex-shrink: 0;
+}
+
+.btn-remove-header:hover {
+  color: var(--error, #e74c3c);
+}
+
+.header-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.btn-preset {
+  font-family: inherit;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-preset:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn-websocket {
+  font-weight: 500;
+}
+
+.rewrite-row,
+.return-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.rewrite-row input,
+.return-row input {
+  flex: 1;
+}
+
+.return-row select {
+  width: 80px;
+  flex-shrink: 0;
+}

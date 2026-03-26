@@ -1,0 +1,149 @@
+.error-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.error-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--error, #f85149);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 540px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.error-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.error-modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--error, #f85149);
+}
+
+.error-modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.error-modal-close:hover {
+  color: var(--text);
+}
+
+.error-modal-location {
+  padding: 0.5rem 1.25rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: rgba(248, 81, 73, 0.1);
+  border-bottom: 1px solid var(--border);
+}
+
+.error-file {
+  font-family: ui-monospace, monospace;
+  margin-right: 0.75rem;
+}
+
+.error-line {
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.error-modal-body {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 1rem 1.25rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text);
+}
+
+.error-modal-context {
+  padding: 0 1.25rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.error-modal-context-title {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0.75rem 0 0.25rem;
+}
+
+.error-modal-context-code {
+  margin: 0;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  background: var(--bg);
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.error-modal-context-code div {
+  white-space: pre;
+}
+
+.error-line-num {
+  display: inline-block;
+  width: 2.5em;
+  margin-right: 0.75rem;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.error-line-highlight {
+  background: rgba(248, 81, 73, 0.2);
+}
+
+.error-line-highlight .error-line-num {
+  color: var(--error);
+}
+
+.error-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.error-modal-actions button {
+  font-family: inherit;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.error-modal-actions button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.error-modal-dismiss {
+  background: var(--error, #f85149) !important;
+  color: white !important;
+  border-color: var(--error) !important;
+}

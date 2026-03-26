@@ -1,0 +1,127 @@
+.wizard-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.wizard-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.wizard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.wizard-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.wizard-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.wizard-close:hover {
+  color: var(--text);
+}
+
+.wizard-steps {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.wizard-steps span.active {
+  color: var(--accent);
+}
+
+.wizard-body {
+  padding: 1.25rem;
+}
+
+.wizard-step label {
+  display: block;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+.wizard-step input[type='text'],
+.wizard-step input[type='number'] {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-family: inherit;
+  font-size: 0.9rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.wizard-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.wizard-row input {
+  width: 80px;
+  margin-bottom: 0;
+}
+
+.wizard-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.wizard-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.wizard-actions button {
+  font-family: inherit;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.wizard-actions button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wizard-finish {
+  background: var(--accent) !important;
+  color: var(--bg) !important;
+  border-color: var(--accent) !important;
+}

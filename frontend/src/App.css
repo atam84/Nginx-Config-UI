@@ -1,0 +1,58 @@
+.app {
+  min-height: 100vh;
+}
+
+.app-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app-nav-links {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.app-nav-links button {
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.4rem 0.9rem;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.app-nav-links button:hover {
+  color: var(--text);
+}
+
+.app-nav-links button.active {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+
+.app-readonly-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  margin-left: auto;
+  padding-left: 1rem;
+}
+
+.app-readonly-toggle:hover {
+  color: var(--text);
+}
