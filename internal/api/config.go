@@ -117,6 +117,102 @@ func SaveConfig(sysCfg system.Config, configRoot, relPath string, cfg *model.Con
 	return os.WriteFile(safePath, []byte(content), 0644)
 }
 
+// SaveAllEntry is a single file payload for SaveAllConfigs.
+type SaveAllEntry struct {
+	Path   string           `json:"path"`
+	Config model.ConfigFile `json:"config"`
+}
+
+// SaveAllError describes a per-file failure from SaveAllConfigs.
+type SaveAllError struct {
+	Path   string `json:"path"`
+	Error  string `json:"error"`
+	Output string `json:"output,omitempty"`
+}
+
+// SaveAllConfigs atomically saves multiple config files.
+// It validates and serializes each file, writes to temp files in the same directory,
+// then renames all at once. On any failure the temp files are removed.
+func SaveAllConfigs(sysCfg system.Config, configRoot string, entries []SaveAllEntry) []SaveAllError {
+	type prepared struct {
+		safePath string
+		tempPath string
+		content  string
+		relPath  string
+	}
+
+	var errs []SaveAllError
+	preps := make([]prepared, 0, len(entries))
+
+	// Phase 1: validate and serialize
+	for _, entry := range entries {
+		safePath := paths.SanitizeConfigPath(configRoot, entry.Path)
+		if safePath == "" {
+			errs = append(errs, SaveAllError{Path: entry.Path, Error: "invalid path"})
+			continue
+		}
+		if err := security.ValidateConfig(&entry.Config); err != nil {
+			errs = append(errs, SaveAllError{Path: entry.Path, Error: err.Error()})
+			continue
+		}
+		content := serializer.Serialize(&entry.Config)
+		preps = append(preps, prepared{safePath: safePath, content: content, relPath: entry.Path})
+	}
+	if len(errs) > 0 {
+		return errs
+	}
+
+	// Phase 2: write to temp files
+	for i := range preps {
+		tmp, err := os.CreateTemp(filepath.Dir(preps[i].safePath), ".nginx-save-*.conf")
+		if err != nil {
+			// Clean up already-created temp files
+			for j := 0; j < i; j++ {
+				os.Remove(preps[j].tempPath)
+			}
+			return []SaveAllError{{Path: preps[i].relPath, Error: err.Error()}}
+		}
+		if _, werr := tmp.WriteString(preps[i].content); werr != nil {
+			tmp.Close()
+			os.Remove(tmp.Name())
+			for j := 0; j < i; j++ {
+				os.Remove(preps[j].tempPath)
+			}
+			return []SaveAllError{{Path: preps[i].relPath, Error: werr.Error()}}
+		}
+		tmp.Close()
+		preps[i].tempPath = tmp.Name()
+	}
+
+	// Phase 3: validate syntax for each file
+	var validErrs []SaveAllError
+	for _, p := range preps {
+		result, _ := system.ValidateConfigContent(sysCfg, p.content)
+		if !result.Success {
+			validErrs = append(validErrs, SaveAllError{Path: p.relPath, Error: "validation failed", Output: result.Output})
+		}
+	}
+	if len(validErrs) > 0 {
+		for _, p := range preps {
+			os.Remove(p.tempPath)
+		}
+		return validErrs
+	}
+
+	// Phase 4: atomic rename temp → final
+	var renameErrs []SaveAllError
+	for _, p := range preps {
+		if err := os.Rename(p.tempPath, p.safePath); err != nil {
+			renameErrs = append(renameErrs, SaveAllError{Path: p.relPath, Error: err.Error()})
+		}
+	}
+	// Clean up any remaining temp files (rename may have left some on partial failure)
+	for _, p := range preps {
+		os.Remove(p.tempPath) // no-op if already renamed
+	}
+	return renameErrs
+}
+
 // CreateConfig creates a new empty config file in conf.d or sites-available.
 func CreateConfig(configRoot, filename, targetDir string) (string, error) {
 	sanitized := security.SanitizeConfigFilename(filename)

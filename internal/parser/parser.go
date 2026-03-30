@@ -17,7 +17,8 @@ func ParseFromString(content string, filePath string) (*model.ConfigFile, error)
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
-	return convertConfig(c, filePath)
+	lines := strings.Split(content, "\n")
+	return convertConfig(c, filePath, lines)
 }
 
 // ParseFromFile parses an Nginx configuration file and returns our JSON AST model.
@@ -32,34 +33,43 @@ func ParseFromFile(path string) (*model.ConfigFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
-	return convertConfig(c, path)
+	raw, _ := os.ReadFile(path)
+	lines := strings.Split(string(raw), "\n")
+	return convertConfig(c, path, lines)
 }
 
 // convertConfig maps gonginx config.Config to our model.ConfigFile.
-func convertConfig(c *config.Config, filePath string) (*model.ConfigFile, error) {
+func convertConfig(c *config.Config, filePath string, lines []string) (*model.ConfigFile, error) {
 	cfg := &model.ConfigFile{
 		FilePath:   filePath,
 		Status:     "enabled",
-		Directives: convertDirectives(c.Block.GetDirectives()),
+		Directives: convertDirectives(c.Block.GetDirectives(), lines, 0),
 	}
 	cfg.EnsureConfigFileIDs()
 	return cfg, nil
 }
 
 // convertDirectives converts a slice of gonginx IDirective to our model nodes.
-func convertDirectives(dirs []config.IDirective) []model.Node {
+// parentLine is the 1-based opening line of the parent block (0 for top-level).
+func convertDirectives(dirs []config.IDirective, lines []string, parentLine int) []model.Node {
 	nodes := make([]model.Node, 0, len(dirs))
+	prevLine := parentLine
 	for _, d := range dirs {
 		if d == nil {
 			continue
 		}
-		nodes = append(nodes, convertDirective(d))
+		node := convertDirective(d, lines)
+		if len(lines) > 0 && d.GetLine() > 0 {
+			node.BlankLinesBefore = countBlankLinesBefore(lines, d.GetLine(), prevLine)
+		}
+		prevLine = d.GetLine()
+		nodes = append(nodes, node)
 	}
 	return nodes
 }
 
 // convertDirective maps a single gonginx IDirective to our model.Node.
-func convertDirective(d config.IDirective) model.Node {
+func convertDirective(d config.IDirective, lines []string) model.Node {
 	args := parametersToArgs(d.GetParameters())
 	comment := strings.Join(d.GetComment(), "\n")
 	if ic := getInlineComment(d); ic != "" {
@@ -81,13 +91,32 @@ func convertDirective(d config.IDirective) model.Node {
 	block := d.GetBlock()
 	if block != nil && len(block.GetDirectives()) > 0 {
 		n.Type = model.NodeTypeBlock
-		n.Directives = convertDirectives(block.GetDirectives())
+		n.Directives = convertDirectives(block.GetDirectives(), lines, d.GetLine())
 	} else {
 		n.Type = model.NodeTypeDirective
 	}
 
 	n.EnsureID()
 	return n
+}
+
+// countBlankLinesBefore counts consecutive blank lines immediately before currentLine.
+// currentLine and floorLine are 1-based. Lines below floorLine are not counted.
+func countBlankLinesBefore(lines []string, currentLine, floorLine int) int {
+	count := 0
+	floor := floorLine
+	if floor < 0 {
+		floor = 0
+	}
+	// Scan backward from the line just before currentLine (0-indexed: currentLine-2)
+	for i := currentLine - 2; i >= floor && i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) == "" {
+			count++
+		} else {
+			break
+		}
+	}
+	return count
 }
 
 func parametersToArgs(params []config.Parameter) []string {

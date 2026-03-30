@@ -184,6 +184,138 @@
   margin: 0.25rem 0 0;
 }
 
+/* F4.1 — Let's Encrypt UI */
+.letsencrypt-section {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.letsencrypt-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.letsencrypt-header label {
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+
+.cert-badge {
+  font-size: 0.72rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.cert-badge-valid {
+  background: rgba(46, 160, 67, 0.2);
+  color: #2ea043;
+}
+
+.cert-badge-expiring_soon {
+  background: rgba(230, 162, 60, 0.2);
+  color: #e3a008;
+}
+
+.cert-badge-expired {
+  background: rgba(248, 81, 73, 0.2);
+  color: #f85149;
+}
+
+.letsencrypt-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.le-input {
+  font-family: inherit;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--input-bg, #0d1117);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.letsencrypt-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.btn-le-request, .btn-le-renew, .btn-le-cancel {
+  font-family: inherit;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.btn-le-request {
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.3);
+}
+
+.btn-le-request:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.25);
+}
+
+.btn-le-renew {
+  background: rgba(46, 160, 67, 0.15);
+  color: #2ea043;
+  border: 1px solid rgba(46, 160, 67, 0.3);
+}
+
+.btn-le-renew:hover:not(:disabled) {
+  background: rgba(46, 160, 67, 0.25);
+}
+
+.btn-le-cancel {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.btn-le-request:disabled, .btn-le-renew:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.le-message {
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.le-ok {
+  background: rgba(46, 160, 67, 0.12);
+  color: #2ea043;
+  border: 1px solid rgba(46, 160, 67, 0.25);
+}
+
+.le-err {
+  background: rgba(248, 81, 73, 0.1);
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.25);
+}
+
 .locations-header {
   display: flex;
   align-items: center;
@@ -378,6 +510,79 @@
   font-weight: 500;
 }
 
+/* F1.2 — inline field row (path + format/level, without the narrow override of .listen-row) */
+.server-field-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.server-field-row input,
+.server-field-row select {
+  width: auto;
+  flex: 1;
+  min-width: 140px;
+  max-width: none;
+}
+
+.input-narrow {
+  flex: 0 0 auto !important;
+  width: 160px !important;
+  max-width: 160px !important;
+}
+
+/* F1.3 — three timeout inputs side by side (server level) */
+.proxy-timeouts-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.proxy-timeouts-row .server-field {
+  flex: 1;
+  min-width: 110px;
+}
+
+.proxy-timeouts-row .server-field input {
+  width: 100%;
+  max-width: none;
+}
+
+/* F1.4 — three timeout inputs side by side (location level) */
+.loc-timeouts-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.loc-timeouts-row .location-field {
+  flex: 1;
+  min-width: 100px;
+  margin-bottom: 0;
+}
+
+.loc-timeouts-row .location-field input {
+  width: 100%;
+  max-width: none;
+}
+
+/* F1.5 — "always" checkbox label inline in header rows */
+.always-label {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* F1.6 — security bundle button */
+.btn-security-bundle {
+  font-weight: 600;
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
 .rewrite-row,
 .return-row {
   display: flex;
@@ -392,4 +597,200 @@
 .return-row select {
   width: 80px;
   flex-shrink: 0;
+}
+
+/* F2.1 — rate limiting row */
+.loc-rate-limit-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.loc-rate-limit-row select {
+  min-width: 120px;
+  flex-shrink: 0;
+}
+
+.loc-rate-short {
+  width: 70px;
+  flex-shrink: 0;
+}
+
+/* ssl-section-label (non-collapsible section header) */
+.ssl-section-label {
+  padding: 0.6rem 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.5rem;
+}
+
+/* F2.9 — SSL enhancements */
+.ssl-enhancements {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border);
+  margin-top: 0.25rem;
+}
+
+.ssl-toggles-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+/* F2.8 — access control */
+.access-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.access-rule-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.access-rule-row select {
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.access-rule-row input[type='text'] {
+  flex: 1;
+}
+
+.access-rule-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.btn-reorder {
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.45rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.btn-reorder:hover {
+  border-color: var(--accent, #3b82f6);
+  color: var(--accent, #3b82f6);
+}
+
+/* F2.6 — if blocks */
+.if-blocks-warning {
+  font-size: 0.78rem;
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.08);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+  border-radius: 5px;
+  padding: 0.35rem 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.if-block-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem;
+  margin-bottom: 0.4rem;
+  background: color-mix(in srgb, var(--bg) 92%, var(--border) 8%);
+}
+
+.if-block-header {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.if-block-label {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: var(--accent, #3b82f6);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.if-condition-input {
+  flex: 1;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+
+.if-block-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border);
+}
+
+.if-directive-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.if-directive-row input[type='text'] {
+  flex: 1;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+
+/* F2.5 — nested locations */
+.nested-locations {
+  border-top: 1px dashed var(--border);
+  padding-top: 0.6rem;
+  margin-top: 0.25rem;
+}
+
+.nested-locations-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.nested-locations-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.nested-location-card {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent, #3b82f6);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.35rem;
+  background: color-mix(in srgb, var(--bg) 95%, var(--accent, #3b82f6) 5%);
+}
+
+.nested-location-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.nested-location-row select {
+  width: 130px;
+  flex-shrink: 0;
+}
+
+.nested-location-row input[type='text'] {
+  flex: 1;
+  min-width: 80px;
 }

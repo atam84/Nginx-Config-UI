@@ -16,6 +16,8 @@
     "vite": "^8.0.1"
   },
   "dependencies": {
+    "@codemirror/legacy-modes": "^6.5.2",
+    "codemirror": "^6.0.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   }

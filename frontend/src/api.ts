@@ -20,6 +20,7 @@ export interface Node {
   args: string[]
   comment?: string
   line_number?: number
+  blank_lines_before?: number
   enabled: boolean
   directives?: Node[]
 }
@@ -175,6 +176,25 @@ export async function uploadBackup(file: File): Promise<{ success: boolean; mess
   return { ...data, success: res.ok }
 }
 
+export async function openFileByPath(path: string): Promise<ConfigFile> {
+  const res = await apiFetch(`${API_BASE}/api/file?path=${encodeURIComponent(path)}`)
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string }
+    throw new Error(data.error ?? 'Failed to open file')
+  }
+  return res.json()
+}
+
+export async function saveFileByPath(path: string, cfg: ConfigFile): Promise<{ success: boolean; message?: string }> {
+  const res = await apiFetch(`${API_BASE}/api/file?path=${encodeURIComponent(path)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg),
+  })
+  const data = await res.json()
+  return { ...data, success: res.ok }
+}
+
 export async function fetchConfigRoot(): Promise<ConfigRootInfo> {
   const res = await apiFetch(`${API_BASE}/api/config-root`)
   if (!res.ok) throw new Error('Failed to fetch config root')
@@ -189,4 +209,191 @@ export async function setConfigRoot(configRoot: string): Promise<{ success: bool
   })
   const data = await res.json()
   return { ...data, success: res.ok }
+}
+
+export async function createStreamServer(req: {
+  file_path: string
+  listen: string
+  udp: boolean
+  ssl: boolean
+  proxy_pass: string
+  proxy_timeout?: string
+  proxy_connect_timeout?: string
+  proxy_buffer_size?: string
+  ssl_preread?: boolean
+}): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/api/stream/server`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error ?? 'Failed to create stream server')
+  }
+}
+
+export async function createStreamUpstream(req: {
+  file_path: string
+  name: string
+  servers: string[]
+}): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/api/stream/upstream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error ?? 'Failed to create stream upstream')
+  }
+}
+
+export async function fetchStreamServers(filename: string): Promise<{ servers: Node[]; upstreams: Node[] }> {
+  const res = await apiFetch(`${API_BASE}/api/stream/servers?file=${encodeURIComponent(filename)}`)
+  if (!res.ok) throw new Error('Failed to fetch stream servers')
+  return res.json()
+}
+
+// ─── History API ─────────────────────────────────────────────────────────────
+
+export async function fetchConfigHistory(path: string): Promise<{ ts: number; size: number }[]> {
+  const res = await apiFetch(`${API_BASE}/api/config/history/${path}`)
+  if (!res.ok) throw new Error('Failed to fetch history')
+  return res.json()
+}
+
+export async function fetchConfigVersion(path: string, ts: number): Promise<string> {
+  const res = await apiFetch(`${API_BASE}/api/config/version?path=${encodeURIComponent(path)}&ts=${ts}`)
+  if (!res.ok) throw new Error('Failed to fetch version')
+  return res.text()
+}
+
+export async function restoreConfigVersion(path: string, ts: number): Promise<{ success: boolean; message?: string }> {
+  const res = await apiFetch(`${API_BASE}/api/config/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, ts }),
+  })
+  const data = await res.json()
+  return { ...data, success: res.ok }
+}
+
+// ─── Search API ───────────────────────────────────────────────────────────────
+
+export interface SearchResult {
+  file_path: string
+  node_id: string
+  directive: string
+  args: string[]
+  line_number: number
+  context: string
+}
+
+export async function searchConfigs(q: string): Promise<{ results: SearchResult[] }> {
+  const res = await apiFetch(`${API_BASE}/api/config/search?q=${encodeURIComponent(q)}`)
+  if (!res.ok) throw new Error('Failed to search')
+  return res.json()
+}
+
+// ─── Include Navigation API ───────────────────────────────────────────────────
+
+export async function resolveInclude(glob: string): Promise<{ files: string[] }> {
+  const res = await apiFetch(`${API_BASE}/api/config/resolve-include?glob=${encodeURIComponent(glob)}`)
+  if (!res.ok) throw new Error('Failed to resolve include')
+  return res.json()
+}
+
+// ─── SSL / Let's Encrypt API ──────────────────────────────────────────────────
+
+export interface CertInfo {
+  name: string
+  domains: string[]
+  cert_path: string
+  key_path: string
+  expires_at?: string
+  days_left: number
+  status: 'valid' | 'expiring_soon' | 'expired' | 'unknown'
+}
+
+export async function fetchSSLCertificates(): Promise<{ certificates: CertInfo[] }> {
+  const res = await apiFetch(`${API_BASE}/api/ssl/certificates`)
+  if (!res.ok) throw new Error('Failed to fetch certificates')
+  return res.json()
+}
+
+export async function requestSSLCertificate(
+  domains: string[],
+  email: string,
+  webroot?: string
+): Promise<{ success: boolean; output: string; certificate?: CertInfo }> {
+  const res = await apiFetch(`${API_BASE}/api/ssl/request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domains, email, webroot: webroot ?? '' }),
+  })
+  const data = await res.json()
+  return { ...data, success: res.ok }
+}
+
+export async function renewSSLCertificate(
+  certName: string
+): Promise<{ success: boolean; output: string }> {
+  const res = await apiFetch(`${API_BASE}/api/ssl/renew`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cert_name: certName }),
+  })
+  const data = await res.json()
+  return { ...data, success: res.ok }
+}
+
+// ─── Parse from text API ──────────────────────────────────────────────────────
+
+// ─── Multi-file Atomic Save ───────────────────────────────────────────────────
+
+export interface SaveAllFileEntry {
+  path: string
+  config: ConfigFile
+}
+
+export interface SaveAllError {
+  path: string
+  error: string
+  output?: string
+}
+
+export async function saveAllConfigs(
+  files: SaveAllFileEntry[]
+): Promise<{ success: boolean; errors?: SaveAllError[] }> {
+  const res = await apiFetch(`${API_BASE}/api/config/save-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ files }),
+  })
+  const data = await res.json()
+  return { success: res.ok && !data.errors?.length, errors: data.errors }
+}
+
+export async function formatConfig(cfg: ConfigFile): Promise<ConfigFile> {
+  const res = await apiFetch(`${API_BASE}/api/config/format`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg),
+  })
+  if (!res.ok) throw new Error('Format failed')
+  return res.json()
+}
+
+export async function parseConfigFromText(text: string): Promise<ConfigFile> {
+  const res = await apiFetch(`${API_BASE}/api/config/parse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: text }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string }
+    throw new Error(data.error ?? 'Failed to parse config')
+  }
+  return res.json()
 }

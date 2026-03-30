@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -86,6 +87,17 @@ func main() {
 			},
 		}
 		cfg.EnsureConfigFileIDs()
+		c.JSON(http.StatusOK, cfg)
+	})
+
+	// Format config: strip blank_lines_before from all nodes (normalize formatting)
+	r.POST("/api/config/format", func(c *gin.Context) {
+		var cfg model.ConfigFile
+		if err := c.ShouldBindJSON(&cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		stripBlankLines(&cfg.Directives)
 		c.JSON(http.StatusOK, cfg)
 	})
 
@@ -190,6 +202,28 @@ func main() {
 		}
 		setConfigRoot(root)
 		c.JSON(http.StatusOK, gin.H{"success": true, "config_root": root})
+	})
+
+	// Save multiple config files atomically
+	r.POST("/api/config/save-all", func(c *gin.Context) {
+		var req struct {
+			Files []api.SaveAllEntry `json:"files"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || len(req.Files) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "files array required"})
+			return
+		}
+		root := getConfigRoot()
+		// Save history for each file before overwriting
+		for _, f := range req.Files {
+			_ = api.SaveHistory(root, f.Path)
+		}
+		errs := api.SaveAllConfigs(sysCfg, root, req.Files)
+		if len(errs) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "errors": errs})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true})
 	})
 
 	// List config files
@@ -307,6 +341,11 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"success": true})
 	})
 
+	// Stream / TCP-UDP proxy routes
+	r.POST("/api/stream/server", api.CreateStreamServerHandler(sysCfg, getConfigRoot))
+	r.POST("/api/stream/upstream", api.CreateStreamUpstreamHandler(sysCfg, getConfigRoot))
+	r.GET("/api/stream/servers", api.ListStreamServersHandler(getConfigRoot))
+
 	// Add location block
 	r.POST("/api/location", func(c *gin.Context) {
 		var req api.AddLocationRequest
@@ -339,6 +378,46 @@ func main() {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+
+	// Open config from any absolute path (no config-root restriction)
+	r.GET("/api/file", func(c *gin.Context) {
+		path := c.Query("path")
+		if path == "" || !filepath.IsAbs(path) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "absolute path required"})
+			return
+		}
+		cfg, err := parser.ParseFromFile(path)
+		if err != nil {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.FilePath = path
+		c.JSON(http.StatusOK, cfg)
+	})
+
+	// Save config to any absolute path (no config-root restriction, no nginx -t)
+	r.PUT("/api/file", func(c *gin.Context) {
+		path := c.Query("path")
+		if path == "" || !filepath.IsAbs(path) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "absolute path required"})
+			return
+		}
+		var cfg model.ConfigFile
+		if err := c.ShouldBindJSON(&cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		content := serializer.Serialize(&cfg)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "Saved"})
 	})
 
 	// Get config file
@@ -382,6 +461,8 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// Save history before overwriting
+		_ = api.SaveHistory(root, path)
 		if err := api.SaveConfig(sysCfg, root, path, &cfg); err != nil {
 			var ve *api.ValidationError
 			if errors.As(err, &ve) {
@@ -399,6 +480,109 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "Saved"})
 	})
 
+	// List history versions for a config file
+	r.GET("/api/config/history/*path", func(c *gin.Context) {
+		path := strings.TrimPrefix(c.Param("path"), "/")
+		if path == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing path"})
+			return
+		}
+		root := getConfigRoot()
+		entries, err := api.ListHistory(root, path)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, entries)
+	})
+
+	// Get a specific version's content
+	r.GET("/api/config/version", func(c *gin.Context) {
+		path := c.Query("path")
+		tsStr := c.Query("ts")
+		if path == "" || tsStr == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "path and ts required"})
+			return
+		}
+		ts, err := strconv.ParseInt(tsStr, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ts"})
+			return
+		}
+		root := getConfigRoot()
+		data, err := api.GetHistoryVersion(root, path, ts)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "version not found"})
+			return
+		}
+		c.Header("Content-Type", "text/plain; charset=utf-8")
+		c.String(http.StatusOK, string(data))
+	})
+
+	// Restore a version
+	r.POST("/api/config/restore", func(c *gin.Context) {
+		var req struct {
+			Path string `json:"path"`
+			Ts   int64  `json:"ts"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.Path == "" || req.Ts == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "path and ts required"})
+			return
+		}
+		root := getConfigRoot()
+		// Save current as history first
+		_ = api.SaveHistory(root, req.Path)
+		// Get the backup version
+		data, err := api.GetHistoryVersion(root, req.Path, req.Ts)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "version not found"})
+			return
+		}
+		safePath := paths.SanitizeConfigPath(root, req.Path)
+		if safePath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+			return
+		}
+		if err := os.WriteFile(safePath, data, 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "Restored"})
+	})
+
+	// Search across all config files
+	r.GET("/api/config/search", func(c *gin.Context) {
+		q := strings.TrimSpace(c.Query("q"))
+		if q == "" {
+			c.JSON(http.StatusOK, gin.H{"results": []interface{}{}})
+			return
+		}
+		root := getConfigRoot()
+		files, err := api.ListConfigFiles(root)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		results := api.SearchConfigs(root, files, q)
+		c.JSON(http.StatusOK, gin.H{"results": results})
+	})
+
+	// Resolve include glob
+	r.GET("/api/config/resolve-include", func(c *gin.Context) {
+		glob := c.Query("glob")
+		if glob == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "glob required"})
+			return
+		}
+		root := getConfigRoot()
+		matches, err := api.ResolveInclude(root, glob)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"files": matches})
+	})
+
 	// Delete config file
 	r.DELETE("/api/config/*path", func(c *gin.Context) {
 		path := strings.TrimPrefix(c.Param("path"), "/")
@@ -411,6 +595,55 @@ func main() {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+
+	// Let's Encrypt / SSL certificate management
+	r.GET("/api/ssl/certificates", func(c *gin.Context) {
+		certs, err := api.ListCertificates()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"certificates": certs})
+	})
+	r.POST("/api/ssl/request", func(c *gin.Context) {
+		var req struct {
+			Domains []string `json:"domains"`
+			Email   string   `json:"email"`
+			Webroot string   `json:"webroot"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || len(req.Domains) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "domains array required"})
+			return
+		}
+		output, err := api.RequestCertificate(req.Domains, req.Email, req.Webroot)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "output": output})
+			return
+		}
+		// Return the certificate info after issuance
+		certName := req.Domains[0]
+		certs, _ := api.ListCertificates()
+		var issued *api.CertInfo
+		for i, cert := range certs {
+			if cert.Name == certName {
+				issued = &certs[i]
+				break
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "output": output, "certificate": issued})
+	})
+	r.POST("/api/ssl/renew", func(c *gin.Context) {
+		var req struct {
+			CertName string `json:"cert_name"`
+		}
+		c.ShouldBindJSON(&req)
+		output, err := api.RenewCertificate(req.CertName)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "output": output})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "output": output})
 	})
 
 	// System operations
@@ -518,4 +751,12 @@ func main() {
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// stripBlankLines recursively zeroes BlankLinesBefore on all nodes (normalize formatting).
+func stripBlankLines(nodes *[]model.Node) {
+	for i := range *nodes {
+		(*nodes)[i].BlankLinesBefore = 0
+		stripBlankLines(&(*nodes)[i].Directives)
+	}
 }

@@ -40,11 +40,15 @@ function getServerDirectives(up: Node): Node[] {
   return (up.directives ?? []).filter((d) => d.name === 'server')
 }
 
-type AlgoType = 'round_robin' | 'least_conn' | 'ip_hash' | 'hash'
+type AlgoType = 'round_robin' | 'least_conn' | 'ip_hash' | 'hash' | 'random' | 'least_time' | 'queue' | 'ntlm'
 
 function getAlgo(up: Node): AlgoType {
   if (up.directives?.some((d) => d.name === 'least_conn')) return 'least_conn'
   if (up.directives?.some((d) => d.name === 'ip_hash')) return 'ip_hash'
+  if (up.directives?.some((d) => d.name === 'random')) return 'random'
+  if (up.directives?.some((d) => d.name === 'least_time')) return 'least_time'
+  if (up.directives?.some((d) => d.name === 'queue')) return 'queue'
+  if (up.directives?.some((d) => d.name === 'ntlm')) return 'ntlm'
   const hashDir = up.directives?.find((d) => d.name === 'hash')
   if (hashDir) return 'hash'
   return 'round_robin'
@@ -167,13 +171,17 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
     onUpdate((c) => replaceNodeById(c, upId, fn))
   }
 
+  const ALGO_DIRECTIVES: AlgoType[] = ['least_conn', 'ip_hash', 'hash', 'random', 'least_time', 'queue', 'ntlm']
+
   const setAlgo = (up: Node, algo: AlgoType) => {
-    const dirs = (up.directives ?? []).filter(
-      (d) => d.name !== 'least_conn' && d.name !== 'ip_hash' && d.name !== 'hash'
-    )
+    const dirs = (up.directives ?? []).filter((d) => !ALGO_DIRECTIVES.includes(d.name as AlgoType))
     if (algo === 'least_conn') dirs.unshift({ type: 'directive', name: 'least_conn', args: [], enabled: true })
     else if (algo === 'ip_hash') dirs.unshift({ type: 'directive', name: 'ip_hash', args: [], enabled: true })
     else if (algo === 'hash') dirs.unshift({ type: 'directive', name: 'hash', args: ['$request_uri', 'consistent'], enabled: true })
+    else if (algo === 'random') dirs.unshift({ type: 'directive', name: 'random', args: [], enabled: true })
+    else if (algo === 'least_time') dirs.unshift({ type: 'directive', name: 'least_time', args: ['header'], enabled: true })
+    else if (algo === 'queue') dirs.unshift({ type: 'directive', name: 'queue', args: ['100'], enabled: true })
+    else if (algo === 'ntlm') dirs.unshift({ type: 'directive', name: 'ntlm', args: [], enabled: true })
     updateUpstream(up.id, (u) => ({ ...u, directives: dirs }))
   }
 
@@ -357,7 +365,16 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
                 <option value="least_conn">Least Connections</option>
                 <option value="ip_hash">IP Hash</option>
                 <option value="hash">Hash</option>
+                <option value="random">Random</option>
+                <optgroup label="Nginx Plus">
+                  <option value="least_time">Least Time (Plus)</option>
+                  <option value="queue">Queue (Plus)</option>
+                  <option value="ntlm">NTLM (Plus)</option>
+                </optgroup>
               </select>
+              {['least_time', 'queue', 'ntlm'].includes(algo) && (
+                <span className="nginx-plus-badge" title="Requires Nginx Plus">Nginx Plus</span>
+              )}
               {algo === 'hash' && (
                 <div className="hash-options">
                   <input

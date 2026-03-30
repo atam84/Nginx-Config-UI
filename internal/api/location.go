@@ -40,6 +40,34 @@ func CreateLocationBlock(req *AddLocationRequest) model.Node {
 	return loc
 }
 
+// AddLocationToLocationRequest is the payload for adding a nested location by parent ID.
+type AddLocationToLocationRequest struct {
+	FilePath     string `json:"file_path"`
+	ParentLocID  string `json:"parent_location_id"`
+	Path         string `json:"path"`
+	MatchType    string `json:"match_type"`
+	ProxyPass    string `json:"proxy_pass"`
+}
+
+// AddLocationToLocation finds a location node by ID anywhere in the tree
+// and appends a child location to it. Returns true if found.
+func AddLocationToLocation(cfg *model.ConfigFile, parentID string, location model.Node) bool {
+	return addLocInNode(&cfg.Directives, parentID, location)
+}
+
+func addLocInNode(nodes *[]model.Node, parentID string, location model.Node) bool {
+	for i := range *nodes {
+		if (*nodes)[i].ID == parentID && (*nodes)[i].Name == "location" {
+			(*nodes)[i].Directives = append((*nodes)[i].Directives, location)
+			return true
+		}
+		if addLocInNode(&(*nodes)[i].Directives, parentID, location) {
+			return true
+		}
+	}
+	return false
+}
+
 // AddLocationToServer inserts a location block into the server at serverIndex.
 func AddLocationToServer(cfg *model.ConfigFile, serverIndex int, location model.Node) bool {
 	for i := range cfg.Directives {

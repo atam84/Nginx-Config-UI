@@ -24,6 +24,9 @@ type Node struct {
 	LineNumber int `json:"line_number,omitempty"`
 	// Enabled controls whether the line is active. If false, serialization prefixes with `#`.
 	Enabled bool `json:"enabled"`
+	// BlankLinesBefore is the number of blank lines before this node in the original file.
+	// Used by the serializer to preserve original formatting. Zero means no extra spacing.
+	BlankLinesBefore int `json:"blank_lines_before,omitempty"`
 	// Directives contains child nodes. Only populated when Type is "block".
 	Directives []Node `json:"directives,omitempty"`
 }

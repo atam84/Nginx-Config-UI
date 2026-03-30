@@ -1,0 +1,234 @@
+.topology-root {
+  background: #0a0e17;
+  color: #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.topology-empty {
+  padding: 48px 32px;
+  color: #64748b;
+  font-size: 14px;
+  text-align: center;
+}
+
+.topology-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #1e293b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.topology-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #3b82f6, #22c55e);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin: 0 0 2px 0;
+}
+
+.topology-subtitle {
+  font-size: 11px;
+  color: #64748b;
+  margin: 0;
+}
+
+.topology-filter-input {
+  background: #111827;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #e2e8f0;
+  font-size: 12px;
+  outline: none;
+  width: 160px;
+}
+
+.topology-filter-input::placeholder {
+  color: #475569;
+}
+
+.topology-view-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #1e293b;
+  background: #111827;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: capitalize;
+  transition: all 0.15s;
+}
+
+.topology-view-btn.active {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.12);
+  color: #93c5fd;
+}
+
+.topology-stats-bar {
+  display: flex;
+  border-bottom: 1px solid #1e293b;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.topology-stat-cell {
+  flex: 1;
+  padding: 10px 14px;
+  border-right: 1px solid #1e293b;
+  min-width: 80px;
+}
+
+.topology-stat-label {
+  font-size: 9px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.topology-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.topology-canvas-wrap {
+  position: relative;
+  overflow: auto;
+  flex: 1;
+  padding: 20px 16px;
+}
+
+.topology-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.topology-columns {
+  display: flex;
+  gap: 16px;
+  position: relative;
+  z-index: 1;
+  min-width: fit-content;
+}
+
+.topology-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 160px;
+}
+
+.topology-col-header {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.topology-matrix-wrap {
+  overflow: auto;
+  flex: 1;
+  padding: 16px;
+}
+
+.topology-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.topology-matrix-th {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 2px solid #1e293b;
+  color: #64748b;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.topology-matrix-row {
+  border-bottom: 1px solid #1e293b;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.topology-matrix-row:hover {
+  background: #1a2236 !important;
+}
+
+.topology-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+  padding: 20px;
+  overflow: auto;
+  flex: 1;
+}
+
+.topology-stats-card {
+  background: #111827;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.topology-stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #1e293b;
+}
+
+.topology-stats-row:last-child {
+  border-bottom: none;
+}
+
+.topology-selection-bar {
+  position: relative;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #111827;
+  border-top: 2px solid #3b82f6;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.topology-clear-btn {
+  background: transparent;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  color: #64748b;
+  padding: 4px 12px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.topology-clear-btn:hover {
+  border-color: #334155;
+  color: #e2e8f0;
+}

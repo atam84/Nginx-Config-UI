@@ -22,6 +22,11 @@ func serializeNode(n *model.Node, level int) string {
 	indent := strings.Repeat(" ", level*indentSpaces)
 	var sb strings.Builder
 
+	// Blank lines before this node (formatting preservation)
+	for i := 0; i < n.BlankLinesBefore; i++ {
+		sb.WriteString("\n")
+	}
+
 	// Block comment above the directive/block
 	if n.Comment != "" {
 		for _, line := range strings.Split(n.Comment, "\n") {

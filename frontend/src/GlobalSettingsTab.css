@@ -101,3 +101,130 @@
   cursor: pointer;
   line-height: 1;
 }
+
+/* ── Events collapsible section ──────────────────────────────────────────── */
+
+.gs-events-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.gs-events-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-card);
+  border: none;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.gs-events-header:hover {
+  background: color-mix(in srgb, var(--bg-card) 80%, var(--border) 20%);
+}
+
+.gs-events-chevron {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+  display: inline-block;
+}
+
+.gs-events-chevron.open {
+  transform: rotate(90deg);
+}
+
+.gs-events-body {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.gs-events-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.gs-events-field {
+  min-width: 160px;
+}
+
+.gs-events-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.gs-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.875rem;
+  color: var(--text);
+}
+
+.gs-toggle-wrap {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.gs-toggle-input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.gs-toggle-track {
+  position: absolute;
+  inset: 0;
+  background: var(--border);
+  border-radius: 20px;
+  transition: background 0.2s;
+}
+
+.gs-toggle-track::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 14px;
+  height: 14px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.gs-toggle-input:checked + .gs-toggle-track {
+  background: var(--accent, #3b82f6);
+}
+
+.gs-toggle-input:checked + .gs-toggle-track::after {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.gs-toggle-input:disabled + .gs-toggle-track {
+  opacity: 0.5;
+}
+
+.gs-toggle-name {
+  font-family: monospace;
+  font-size: 0.85rem;
+}

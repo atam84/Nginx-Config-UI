@@ -109,6 +109,17 @@
   color: var(--success, #2ea043);
 }
 
+.file-list .file-status.dirty {
+  background: transparent;
+  color: #e3a008;
+  font-size: 0.75rem;
+  padding: 0;
+}
+
+.file-list li.dirty > .file-path {
+  font-style: italic;
+}
+
 .file-list li:hover {
   background: rgba(255, 255, 255, 0.04);
 }
@@ -272,6 +283,10 @@
   cursor: not-allowed;
 }
 
+.btn-save.btn-dirty {
+  background: #e3a008;
+}
+
 .tabs {
   display: flex;
   gap: 0.25rem;
@@ -309,4 +324,249 @@
   padding: 4rem;
   text-align: center;
   color: var(--text-muted);
+}
+
+/* ── Source mode tabs ─────────────────────────────────────────────────────── */
+
+.sidebar-source-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-source-tabs button {
+  flex: 1;
+  font-family: inherit;
+  font-size: 0.72rem;
+  padding: 0.5rem 0.25rem;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.sidebar-source-tabs button:hover {
+  color: var(--text);
+}
+
+.sidebar-source-tabs button.active {
+  color: var(--accent, #3b82f6);
+  border-bottom-color: var(--accent, #3b82f6);
+}
+
+/* ── Sidebar panel (file / new modes) ────────────────────────────────────── */
+
+.sidebar-panel {
+  padding: 1rem;
+}
+
+.sidebar-panel-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+/* Open File panel */
+
+.open-file-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.open-file-form label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.open-file-form input[type='text'] {
+  font-family: monospace;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.open-file-form button {
+  font-family: inherit;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.open-file-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.open-file-current {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  padding-top: 0.25rem;
+}
+
+/* New Config panel */
+
+.new-config-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.btn-template {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.btn-template:hover {
+  border-color: var(--accent, #3b82f6);
+}
+
+.template-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.template-desc {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+/* New config title in header */
+
+.config-title-new {
+  color: var(--text-muted) !important;
+  font-style: italic;
+}
+
+/* ── Save As modal ────────────────────────────────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 500;
+}
+
+.save-as-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 501;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  min-width: 380px;
+  max-width: 480px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.save-as-modal h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.save-as-mode-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.save-as-mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: var(--bg);
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.save-as-mode-btn.active {
+  border-color: var(--accent, #3b82f6);
+  color: var(--text);
+}
+
+.save-as-mode-btn input[type='radio'] {
+  accent-color: var(--accent, #3b82f6);
+}
+
+.save-as-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.save-as-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.save-as-field label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.save-as-field input[type='text'],
+.save-as-field select {
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+}
+
+.save-as-field input[type='text'] {
+  font-family: monospace;
+}
+
+.save-as-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.save-as-actions button {
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.45rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
 }

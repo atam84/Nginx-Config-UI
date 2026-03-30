@@ -2,6 +2,20 @@ import { useState } from 'react'
 import { type ConfigFile, type Node } from './api'
 import './GlobalSettingsTab.css'
 
+// ─── Events block helpers ─────────────────────────────────────────────────────
+
+function getEventsArg(eventsBlock: Node | undefined, name: string): string {
+  return eventsBlock?.directives?.find((d) => d.name === name)?.args?.[0] ?? ''
+}
+
+function getEventsToggle(eventsBlock: Node | undefined, name: string): boolean {
+  return getEventsArg(eventsBlock, name) === 'on'
+}
+
+function getEventsFlagPresent(eventsBlock: Node | undefined, name: string): boolean {
+  return !!eventsBlock?.directives?.find((d) => d.name === name)
+}
+
 const GLOBAL_DIRECTIVE_PRESETS: Array<{ name: string; args: string[] }> = [
   { name: 'include', args: ['/etc/nginx/conf.d/*.conf'] },
   { name: 'include', args: ['/etc/nginx/sites-enabled/*'] },
@@ -45,6 +59,51 @@ interface Props {
 
 export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, directives, onUpdate, readOnly }: Props) {
   const [newDirectivePreset, setNewDirectivePreset] = useState('include:/etc/nginx/conf.d/*.conf')
+  const [eventsOpen, setEventsOpen] = useState(true)
+
+  // ── Events block ──
+  const eventsBlock = directives.find((d) => d.name === 'events' && d.type === 'block')
+
+  const updateEventsBlock = (updater: (dirs: Node[]) => Node[]) => {
+    onUpdate((c) => {
+      const existing = c.directives.find((d) => d.name === 'events' && d.type === 'block')
+      if (existing) {
+        return {
+          ...c,
+          directives: c.directives.map((d) =>
+            d.name === 'events' && d.type === 'block'
+              ? { ...d, directives: updater(d.directives ?? []) }
+              : d
+          ),
+        }
+      }
+      return {
+        ...c,
+        directives: [
+          ...c.directives,
+          { type: 'block' as const, name: 'events', enabled: true, directives: updater([]) },
+        ],
+      }
+    })
+  }
+
+  const setEventsDir = (name: string, args: string[]) => {
+    updateEventsBlock((dirs) => {
+      const without = dirs.filter((d) => d.name !== name)
+      if (args.length === 0) return without
+      return [...without, { type: 'directive' as const, name, args, enabled: true }]
+    })
+  }
+
+  const setEventsToggle = (name: string, on: boolean) => setEventsDir(name, [on ? 'on' : 'off'])
+
+  const setEventsFlag = (name: string, present: boolean) => {
+    updateEventsBlock((dirs) => {
+      const without = dirs.filter((d) => d.name !== name)
+      if (!present) return without
+      return [...without, { type: 'directive' as const, name, args: [], enabled: true }]
+    })
+  }
   const extraDirectiveItems = directives
     .map((d, idx) => ({ d, idx }))
     .filter(
@@ -150,6 +209,94 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
             placeholder="/run/nginx.pid"
           />
         </div>
+      </div>
+
+      {/* ── Events block ──────────────────────────────────────────────────── */}
+      <div className="gs-events-section">
+        <button
+          type="button"
+          className="gs-events-header"
+          onClick={() => setEventsOpen((v) => !v)}
+        >
+          <span className={`gs-events-chevron${eventsOpen ? ' open' : ''}`}>▶</span>
+          Events
+        </button>
+        {eventsOpen && (
+          <div className="gs-events-body">
+            <div className="gs-events-row">
+              <div className="field gs-events-field">
+                <label>worker_connections</label>
+                <div className="field-control">
+                  <input
+                    type="number"
+                    value={getEventsArg(eventsBlock, 'worker_connections')}
+                    onChange={(e) => setEventsDir('worker_connections', e.target.value ? [e.target.value] : [])}
+                    readOnly={readOnly}
+                    placeholder="1024"
+                    min="1"
+                  />
+                </div>
+              </div>
+              <div className="field gs-events-field">
+                <label>use</label>
+                <div className="field-control">
+                  <select
+                    value={getEventsArg(eventsBlock, 'use')}
+                    onChange={(e) => setEventsDir('use', e.target.value ? [e.target.value] : [])}
+                    disabled={readOnly}
+                  >
+                    <option value="">— not set —</option>
+                    <option value="epoll">epoll</option>
+                    <option value="kqueue">kqueue</option>
+                    <option value="select">select</option>
+                    <option value="poll">poll</option>
+                    <option value="auto">auto</option>
+                  </select>
+                </div>
+              </div>
+              <div className="field gs-events-field">
+                <label>accept_mutex_delay</label>
+                <div className="field-control">
+                  <input
+                    type="text"
+                    value={getEventsArg(eventsBlock, 'accept_mutex_delay')}
+                    onChange={(e) => setEventsDir('accept_mutex_delay', e.target.value ? [e.target.value] : [])}
+                    readOnly={readOnly}
+                    placeholder="500ms"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="gs-events-toggles">
+              <label className="gs-toggle-label">
+                <span className="gs-toggle-wrap">
+                  <input
+                    type="checkbox"
+                    className="gs-toggle-input"
+                    checked={getEventsFlagPresent(eventsBlock, 'multi_accept') ? getEventsToggle(eventsBlock, 'multi_accept') : false}
+                    onChange={(e) => setEventsToggle('multi_accept', e.target.checked)}
+                    disabled={readOnly}
+                  />
+                  <span className="gs-toggle-track" />
+                </span>
+                <span className="gs-toggle-name">multi_accept</span>
+              </label>
+              <label className="gs-toggle-label">
+                <span className="gs-toggle-wrap">
+                  <input
+                    type="checkbox"
+                    className="gs-toggle-input"
+                    checked={getEventsFlagPresent(eventsBlock, 'accept_mutex') ? getEventsToggle(eventsBlock, 'accept_mutex') : false}
+                    onChange={(e) => setEventsToggle('accept_mutex', e.target.checked)}
+                    disabled={readOnly}
+                  />
+                  <span className="gs-toggle-track" />
+                </span>
+                <span className="gs-toggle-name">accept_mutex</span>
+              </label>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="extra-directives">

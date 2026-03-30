@@ -329,3 +329,15 @@
 .btn-remove:hover {
   color: var(--error);
 }
+
+.nginx-plus-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(255, 163, 26, 0.15);
+  color: #ffa31a;
+  border: 1px solid rgba(255, 163, 26, 0.3);
+  vertical-align: middle;
+  white-space: nowrap;
+}
