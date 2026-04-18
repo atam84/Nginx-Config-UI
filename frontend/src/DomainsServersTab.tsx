@@ -185,6 +185,8 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
   const [expandedErrorPages, setExpandedErrorPages] = useState<Record<string, boolean>>({})
   // §42.2 — FastCGI section per-location collapse state; defaults to open when the location already uses fastcgi_pass
   const [expandedFcgi, setExpandedFcgi] = useState<Record<string, boolean>>({})
+  // §43.1 — uWSGI section per-location collapse state; defaults to open when the location already uses uwsgi_pass
+  const [expandedUwsgi, setExpandedUwsgi] = useState<Record<string, boolean>>({})
   // Collapse state for top-level block cards. Default behaviour: server/nested-location collapse state
   // lives in these maps; `undefined` means "default expanded" (since users usually want to see a
   // server's body on first load — contrast with the top-level location cards which default to collapsed).
@@ -3372,6 +3374,234 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                       </div>
                                     </>
                                   )}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
+
+                        {/* §43.1 — uWSGI / Python */}
+                        {(() => {
+                          const uwsgiPass = getDirectiveArg(loc, 'uwsgi_pass', 0)
+                          const hasUwsgiParams = (loc.directives ?? []).some(
+                            (d) => d.name === 'include' && d.args?.[0] === 'uwsgi_params',
+                          )
+                          const uwsgiParamsCommitted = (loc.directives ?? [])
+                            .filter((d) => d.name === 'uwsgi_param')
+                            .map((d) => ({
+                              key: d.args?.[0] ?? '',
+                              value: d.args?.[1] ?? '',
+                              cond: d.args?.[2] ?? '',
+                            }))
+                          const uwsgiParamDraftCount = getDrafts(loc.id, 'locUwsgiParam')
+                          const uwsgiParams = [
+                            ...uwsgiParamsCommitted,
+                            ...Array.from({ length: uwsgiParamDraftCount }, () => ({ key: '', value: '', cond: '' })),
+                          ]
+                          const uwsgiReadT = getDirectiveArg(loc, 'uwsgi_read_timeout', 0)
+                          const uwsgiBuffersDir = (loc.directives ?? []).find((d) => d.name === 'uwsgi_buffers')
+                          const uwsgiBuffersNum = uwsgiBuffersDir?.args?.[0] ?? ''
+                          const uwsgiBuffersSize = uwsgiBuffersDir?.args?.[1] ?? ''
+                          const uwsgiKey = loc.id ?? `loc-${li}`
+                          const uwsgiOpen = expandedUwsgi[uwsgiKey] ?? Boolean(uwsgiPass || hasUwsgiParams || uwsgiParamsCommitted.length > 0)
+
+                          const writeUwsgiParams = (rows: { key: string; value: string; cond: string }[]) => {
+                            const items = rows.map((r) => {
+                              const trimmedCond = r.cond?.trim() ?? ''
+                              const args = [r.key, r.value]
+                              if (trimmedCond) args.push(trimmedCond)
+                              return { args }
+                            })
+                            const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'uwsgi_param', items)
+                            const afterCommitted = items.filter((it) => it.args.some((a) => a.trim() !== '')).length
+                            syncDrafts(loc.id, 'locUwsgiParam', uwsgiParamsCommitted.length, afterCommitted)
+                            updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                          }
+
+                          const toggleUwsgiInclude = (on: boolean) => {
+                            const dirs = (loc.directives ?? []).filter(
+                              (d) => !(d.name === 'include' && d.args?.[0] === 'uwsgi_params'),
+                            )
+                            if (on) {
+                              dirs.push({ type: 'directive', name: 'include', args: ['uwsgi_params'], enabled: true })
+                            }
+                            updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                          }
+
+                          return (
+                            <div className="fcgi-section">
+                              <button
+                                type="button"
+                                className="ssl-section-toggle"
+                                onClick={() => setExpandedUwsgi((p) => ({ ...p, [uwsgiKey]: !uwsgiOpen }))}
+                              >
+                                {uwsgiOpen ? '▾' : '▸'} uWSGI / Python
+                                {Boolean(uwsgiPass) && <span className="fcgi-badge"> {uwsgiPass.startsWith('unix:') ? 'unix socket' : 'tcp'}</span>}
+                              </button>
+                              {uwsgiOpen && (
+                                <div className="ssl-fields">
+                                  <div className="location-field">
+                                    <label>
+                                      uwsgi_pass
+                                      <InfoIcon text="uWSGI backend — either a unix socket (`unix:/run/uwsgi/django.sock`) or a TCP endpoint (`127.0.0.1:3031`). uWSGI's default protocol is NOT HTTP; point it at a uWSGI server configured with `socket` or `uwsgi-socket`, not `http-socket`. Use `proxy_pass http://…` instead for ASGI/HTTP backends like Gunicorn or Uvicorn." />
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={uwsgiPass}
+                                      onChange={(e) =>
+                                        setLocationDirective(loc, 'uwsgi_pass', e.target.value ? [e.target.value] : [])
+                                      }
+                                      placeholder="unix:/run/uwsgi/app.sock or 127.0.0.1:3031"
+                                      spellCheck={false}
+                                    />
+                                  </div>
+                                  <div className="location-field">
+                                    <label className="checkbox-label">
+                                      <input
+                                        type="checkbox"
+                                        checked={hasUwsgiParams}
+                                        onChange={(e) => toggleUwsgiInclude(e.target.checked)}
+                                      />
+                                      include uwsgi_params
+                                      <InfoIcon text="Pulls the standard uWSGI CGI-style environment bundle (REQUEST_METHOD, QUERY_STRING, PATH_INFO, SCRIPT_NAME, REMOTE_ADDR, etc.) from /etc/nginx/uwsgi_params. Required for Django/Flask/Pyramid apps run via uWSGI — without it WSGI apps won't see the request correctly." />
+                                    </label>
+                                  </div>
+
+                                  <div className="location-field">
+                                    <label>
+                                      uwsgi_param
+                                      <InfoIcon text="Per-request variable passed to the uWSGI backend. Typical overrides: `UWSGI_SCRIPT myproject.wsgi` (tells uWSGI which Python callable), or `HTTPS on if_not_empty` when TLS is terminated at nginx. Most standard variables come from include uwsgi_params — only add rows here for overrides." />
+                                    </label>
+                                    <div className="header-list">
+                                      {uwsgiParams.map((p, pi) => (
+                                        <div key={pi} className="header-row fcgi-param-row">
+                                          <input
+                                            type="text"
+                                            placeholder="PARAM_NAME"
+                                            value={p.key}
+                                            onChange={(e) =>
+                                              writeUwsgiParams(
+                                                uwsgiParams.map((x, i) => (i === pi ? { ...x, key: e.target.value } : x)),
+                                              )
+                                            }
+                                            spellCheck={false}
+                                          />
+                                          <input
+                                            type="text"
+                                            placeholder="$value"
+                                            value={p.value}
+                                            onChange={(e) =>
+                                              writeUwsgiParams(
+                                                uwsgiParams.map((x, i) => (i === pi ? { ...x, value: e.target.value } : x)),
+                                              )
+                                            }
+                                            spellCheck={false}
+                                          />
+                                          <input
+                                            type="text"
+                                            placeholder="if_not_empty (optional)"
+                                            value={p.cond}
+                                            onChange={(e) =>
+                                              writeUwsgiParams(
+                                                uwsgiParams.map((x, i) => (i === pi ? { ...x, cond: e.target.value } : x)),
+                                              )
+                                            }
+                                            spellCheck={false}
+                                          />
+                                          <button
+                                            type="button"
+                                            className="btn-remove-header"
+                                            onClick={() =>
+                                              writeUwsgiParams(uwsgiParams.filter((_, i) => i !== pi))
+                                            }
+                                            title="Remove param"
+                                          >
+                                            ×
+                                          </button>
+                                        </div>
+                                      ))}
+                                      <div className="fcgi-param-presets">
+                                        <button
+                                          type="button"
+                                          className="btn-add-header"
+                                          onClick={() => addDraft(loc.id, 'locUwsgiParam')}
+                                        >
+                                          + Add param
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn-preset"
+                                          onClick={() => {
+                                            const has = (k: string) => uwsgiParamsCommitted.some((p) => p.key === k)
+                                            const extra: { key: string; value: string; cond: string }[] = []
+                                            if (!has('HTTPS'))
+                                              extra.push({ key: 'HTTPS', value: '$https', cond: 'if_not_empty' })
+                                            if (!has('UWSGI_SCHEME'))
+                                              extra.push({ key: 'UWSGI_SCHEME', value: '$scheme', cond: '' })
+                                            if (extra.length > 0) writeUwsgiParams([...uwsgiParamsCommitted, ...extra])
+                                          }}
+                                          title="Adds HTTPS + UWSGI_SCHEME, common when TLS terminates at nginx"
+                                        >
+                                          + Behind nginx TLS
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="loc-timeouts-row">
+                                    <div className="location-field">
+                                      <label>
+                                        uwsgi_read_timeout
+                                        <InfoIcon text="Max time between two successive reads from the uWSGI backend (not total request duration). Default 60s — far too short for most Django report endpoints, async Celery-triggered views, or PDF generation. 300s–600s is common; exceeding kills the connection with 504 Gateway Timeout." />
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={uwsgiReadT}
+                                        onChange={(e) =>
+                                          setLocationDirective(loc, 'uwsgi_read_timeout', e.target.value ? [e.target.value] : [])
+                                        }
+                                        placeholder="300s"
+                                      />
+                                    </div>
+                                    <div className="location-field">
+                                      <label>
+                                        uwsgi_buffers
+                                        <InfoIcon text="Number and size of the buffers used for the uWSGI response body. Default 8 × page-size. Two inputs: count and unit size (e.g. 16 × 16k = 256k window). Raise for apps returning large JSON payloads or HTML with many cookies — otherwise nginx spills to disk or truncates." />
+                                      </label>
+                                      <div className="fcgi-buffers-pair">
+                                        <input
+                                          type="text"
+                                          className="fcgi-buffers-num"
+                                          value={uwsgiBuffersNum}
+                                          placeholder="16"
+                                          onChange={(e) => {
+                                            const num = e.target.value.trim()
+                                            const size = uwsgiBuffersSize.trim()
+                                            if (!num && !size) {
+                                              removeLocationDirective(loc, 'uwsgi_buffers')
+                                            } else {
+                                              setLocationDirective(loc, 'uwsgi_buffers', [num, size || '16k'])
+                                            }
+                                          }}
+                                        />
+                                        <span className="fcgi-buffers-x">×</span>
+                                        <input
+                                          type="text"
+                                          value={uwsgiBuffersSize}
+                                          placeholder="16k"
+                                          onChange={(e) => {
+                                            const num = uwsgiBuffersNum.trim()
+                                            const size = e.target.value.trim()
+                                            if (!num && !size) {
+                                              removeLocationDirective(loc, 'uwsgi_buffers')
+                                            } else {
+                                              setLocationDirective(loc, 'uwsgi_buffers', [num || '16', size])
+                                            }
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
                                 </div>
                               )}
                             </div>

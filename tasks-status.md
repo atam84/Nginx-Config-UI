@@ -1,7 +1,7 @@
 # Nginx Reverse Proxy Manager — Tasks Status
 
 **Project:** nginx-config-ui  
-**Last Updated:** 2026-04-18 (Phase 6 complete; §42 PHP/FastCGI complete; cross-tab block collapsibility added — all top-level cards now collapse with a summary line)
+**Last Updated:** 2026-04-18 (Phase 6 complete; §42 PHP/FastCGI + §43 Python/uWSGI complete; cross-tab block collapsibility in place)
 **Source Documents:** `docs/Nginx_Reverse_Proxy_Manager_Arch.md`, `docs/Nginx_Reverse_Proxy_Manager_Technical.md`, `docs/gaps.md`, `docs/features.md`, `docs/nginx-topology.jsx`
 
 ---
@@ -610,8 +610,8 @@
 
 | ID | Task | Status |
 | :--- | :--- | :---: |
-| 43.1 | Location card **uWSGI** section: `uwsgi_pass`, `include uwsgi_params`, `uwsgi_param` key-value editor, `uwsgi_read_timeout`, `uwsgi_buffers` | Pending |
-| 43.2 | New Proxy Wizard: **"Python / uWSGI (Django/Flask)"** template | Pending |
+| 43.1 | Location card **uWSGI** section (collapsible, auto-opens when `uwsgi_pass` / params already present): `uwsgi_pass` with unix/tcp badge, `include uwsgi_params` toggle, repeated `uwsgi_param` editor with optional `if_not_empty` column, `uwsgi_read_timeout`, `uwsgi_buffers` (count × size pair widget). Preset **+ Behind nginx TLS** seeds `HTTPS $https if_not_empty` and `UWSGI_SCHEME $scheme`. Parser round-trip locked in via `TestParseSerializeRoundtrip_Uwsgi` in `internal/serializer/serializer_test.go`. | Done |
+| 43.2 | NewProxyWizard gains a third Template option **Python / uWSGI**. Step 2 collects uwsgi backend (unix/tcp), `uwsgi_read_timeout`, and an optional `/static/` alias (URL prefix + `alias` root). Emits: `listen`, `server_name`, optional `location /static/ { alias; expires 30d; access_log off; }`, and a `location / { include uwsgi_params; uwsgi_pass; uwsgi_param HTTPS if_not_empty; uwsgi_read_timeout; uwsgi_buffers 16 16k; client_max_body_size 25m; }`. Template card grid switched to `auto-fit minmax(12rem, 1fr)` to accommodate three cards cleanly. | Done |
 
 ---
 
@@ -834,7 +834,7 @@
 | | | | | | |
 | **Phase 7 — Application Backend Activation** | | | | | |
 | 42. PHP / FastCGI Support (F7.1) | 6 | 0 | 0 | 6 | 0 |
-| 43. Python uWSGI Support (F7.2) | 2 | 2 | 0 | 0 | 0 |
+| 43. Python uWSGI Support (F7.2) | 2 | 0 | 0 | 2 | 0 |
 | 44. gRPC Support (F7.3) | 3 | 3 | 0 | 0 | 0 |
 | 45. Static Site / SPA Support (F7.4) | 7 | 7 | 0 | 0 | 0 |
 | 46. Node.js / ASGI Wizard Templates (F7.5) | 3 | 3 | 0 | 0 | 0 |
@@ -851,6 +851,6 @@
 | 53. Ingress / Egress Dashboards (F9.1) | 5 | 5 | 0 | 0 | 0 |
 | 54. Ingress Advanced — Access & Traffic (F9.2) | 4 | 4 | 0 | 0 | 0 |
 | 55. Egress Tuning (F9.3) | 4 | 4 | 0 | 0 | 0 |
-| **Subtotal (Phases 6–9 — 2026-04-18 audit)** | **62** | **49** | **0** | **13** | **0** |
+| **Subtotal (Phases 6–9 — 2026-04-18 audit)** | **62** | **47** | **0** | **15** | **0** |
 | | | | | | |
-| **Grand Total** | **275** | **49** | **0** | **226** | **0** |
+| **Grand Total** | **275** | **47** | **0** | **228** | **0** |

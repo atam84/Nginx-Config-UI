@@ -251,3 +251,89 @@ func TestParseSerializeRoundtrip_FastCGI(t *testing.T) {
 		}
 	}
 }
+
+// §43.1 — uWSGI directives must round-trip through parser → serializer →
+// parser unchanged. Same unknown-directive preservation path as FastCGI; this
+// test locks in the specific argument shapes the UI emits for Django / Flask
+// deployments via uWSGI, including the 3-arg uwsgi_param `if_not_empty` form
+// and the 2-arg uwsgi_buffers (count + size).
+func TestParseSerializeRoundtrip_Uwsgi(t *testing.T) {
+	conf := `http {
+    server {
+        listen 80;
+        server_name django.example.com;
+
+        location /static/ {
+            alias /var/www/app/static/;
+            expires 30d;
+            access_log off;
+        }
+
+        location / {
+            include uwsgi_params;
+            uwsgi_pass unix:/run/uwsgi/app.sock;
+            uwsgi_param HTTPS $https if_not_empty;
+            uwsgi_param UWSGI_SCHEME $scheme;
+            uwsgi_read_timeout 300s;
+            uwsgi_buffers 16 16k;
+            uwsgi_buffer_size 16k;
+            client_max_body_size 25m;
+        }
+
+        location /api/ {
+            include uwsgi_params;
+            uwsgi_pass 127.0.0.1:3031;
+            uwsgi_read_timeout 600s;
+        }
+    }
+}
+`
+	cfg, err := parser.ParseFromString(conf, "test.conf")
+	if err != nil {
+		t.Fatalf("initial parse failed: %v", err)
+	}
+	out := Serialize(cfg)
+	cfg2, err := parser.ParseFromString(out, "test.conf")
+	if err != nil {
+		t.Fatalf("re-parse failed: %v\nOutput was:\n%s", err, out)
+	}
+
+	var flatten func(nodes []model.Node, acc *[]string)
+	flatten = func(nodes []model.Node, acc *[]string) {
+		for _, n := range nodes {
+			*acc = append(*acc, n.Name+" "+strings.Join(n.Args, " "))
+			if n.Type == model.NodeTypeBlock {
+				flatten(n.Directives, acc)
+			}
+		}
+	}
+
+	var before, after []string
+	flatten(cfg.Directives, &before)
+	flatten(cfg2.Directives, &after)
+	if len(before) != len(after) {
+		t.Fatalf("directive count mismatch: before=%d after=%d\n\nserialized:\n%s",
+			len(before), len(after), out)
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			t.Errorf("directive[%d] mismatch:\n  before: %q\n  after:  %q", i, before[i], after[i])
+		}
+	}
+
+	mustContain := []string{
+		"uwsgi_pass unix:/run/uwsgi/app.sock",
+		"uwsgi_pass 127.0.0.1:3031",
+		"uwsgi_param HTTPS $https if_not_empty",
+		"uwsgi_param UWSGI_SCHEME $scheme",
+		"uwsgi_read_timeout 300s",
+		"uwsgi_read_timeout 600s",
+		"uwsgi_buffers 16 16k",
+		"include uwsgi_params",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(out, want) {
+			t.Errorf("serialized output missing %q\n\nfull output:\n%s", want, out)
+		}
+	}
+}

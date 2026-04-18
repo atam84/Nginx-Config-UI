@@ -17,10 +17,10 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
-/* §42.6 — template selector cards + step progress */
+/* §42.6 / §43.2 — template selector cards + step progress */
 .wizard-templates {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
   gap: 0.5rem;
   margin: 0.25rem 0 1rem;
 }

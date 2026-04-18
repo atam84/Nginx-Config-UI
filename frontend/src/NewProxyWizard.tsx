@@ -11,7 +11,7 @@ interface Props {
   onClose: () => void
 }
 
-type Template = 'proxy' | 'php'
+type Template = 'proxy' | 'php' | 'uwsgi'
 
 /** True if destination looks like an upstream name (simple identifier, not URL/hostname) */
 function looksLikeUpstreamName(dest: string): boolean {
@@ -43,6 +43,12 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
   const [phpFpmBackend, setPhpFpmBackend] = useState('unix:/run/php/php-fpm.sock')
   const [phpIndex, setPhpIndex] = useState('index.php')
   const [phpTryFiles, setPhpTryFiles] = useState(true)
+  // §43.2 — Python / uWSGI template state
+  const [uwsgiBackend, setUwsgiBackend] = useState('unix:/run/uwsgi/app.sock')
+  const [uwsgiStaticUrl, setUwsgiStaticUrl] = useState('/static/')
+  const [uwsgiStaticRoot, setUwsgiStaticRoot] = useState('/var/www/app/static/')
+  const [uwsgiServeStatic, setUwsgiServeStatic] = useState(true)
+  const [uwsgiReadTimeout, setUwsgiReadTimeout] = useState('300s')
 
   const portNum = ssl ? (port || '443') : (port || '80')
 
@@ -171,7 +177,65 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
     return server
   }
 
-  const buildServer = (): Node => (template === 'php' ? buildPhpServer() : buildProxyServer())
+  const buildUwsgiServer = (): Node => {
+    const server: Node = {
+      type: 'block',
+      name: 'server',
+      args: [],
+      enabled: true,
+      id: nid('server'),
+      directives: [
+        { type: 'directive', name: 'listen', args: [listenArg()], enabled: true },
+      ],
+    }
+    const sn = serverNameNode()
+    if (sn) server.directives!.push(sn)
+
+    // Optional /static/ alias block — served by nginx directly, bypassing uWSGI.
+    if (uwsgiServeStatic && uwsgiStaticUrl.trim() && uwsgiStaticRoot.trim()) {
+      const url = uwsgiStaticUrl.trim().endsWith('/') ? uwsgiStaticUrl.trim() : `${uwsgiStaticUrl.trim()}/`
+      const root = uwsgiStaticRoot.trim().endsWith('/') ? uwsgiStaticRoot.trim() : `${uwsgiStaticRoot.trim()}/`
+      server.directives!.push({
+        type: 'block',
+        name: 'location',
+        args: [url],
+        enabled: true,
+        id: nid('location'),
+        directives: [
+          { type: 'directive', name: 'alias', args: [root], enabled: true },
+          { type: 'directive', name: 'expires', args: ['30d'], enabled: true },
+          { type: 'directive', name: 'access_log', args: ['off'], enabled: true },
+        ],
+      })
+    }
+
+    // Main uWSGI passthrough block.
+    const uwsgiBackendValue = (uwsgiBackend || 'unix:/run/uwsgi/app.sock').trim()
+    const readT = (uwsgiReadTimeout || '300s').trim()
+    server.directives!.push({
+      type: 'block',
+      name: 'location',
+      args: ['/'],
+      enabled: true,
+      id: nid('location'),
+      directives: [
+        { type: 'directive', name: 'include', args: ['uwsgi_params'], enabled: true },
+        { type: 'directive', name: 'uwsgi_pass', args: [uwsgiBackendValue], enabled: true },
+        { type: 'directive', name: 'uwsgi_param', args: ['HTTPS', '$https', 'if_not_empty'], enabled: true },
+        { type: 'directive', name: 'uwsgi_read_timeout', args: [readT], enabled: true },
+        { type: 'directive', name: 'uwsgi_buffers', args: ['16', '16k'], enabled: true },
+        { type: 'directive', name: 'client_max_body_size', args: ['25m'], enabled: true },
+      ],
+    })
+
+    return server
+  }
+
+  const buildServer = (): Node => {
+    if (template === 'php') return buildPhpServer()
+    if (template === 'uwsgi') return buildUwsgiServer()
+    return buildProxyServer()
+  }
 
   const handleFinish = () => {
     const server = buildServer()
@@ -187,7 +251,7 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
     onClose()
   }
 
-  const totalSteps = template === 'php' ? 3 : 4
+  const totalSteps = template === 'proxy' ? 4 : 3
 
   return (
     <div className="wizard-overlay" onClick={onClose}>
@@ -201,7 +265,7 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
         <div className="wizard-steps">
           <span className={step >= 1 ? 'active' : ''}>1. Template &amp; Domain</span>
           <span className={step >= 2 ? 'active' : ''}>
-            2. {template === 'php' ? 'PHP Backend' : 'Destination'}
+            2. {template === 'php' ? 'PHP Backend' : template === 'uwsgi' ? 'uWSGI Backend' : 'Destination'}
           </span>
           <span className={step >= 3 ? 'active' : ''}>3. SSL</span>
           {template === 'proxy' && (
@@ -219,7 +283,7 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
                   onClick={() => setTemplate('proxy')}
                 >
                   <div className="wizard-template-name">Reverse Proxy</div>
-                  <div className="wizard-template-desc">Forward requests to a backend / upstream (Node, Python, Go, etc.)</div>
+                  <div className="wizard-template-desc">Forward requests to a backend / upstream (Node, Go, ASGI, etc.)</div>
                 </button>
                 <button
                   type="button"
@@ -228,6 +292,14 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
                 >
                   <div className="wizard-template-name">PHP / PHP-FPM site</div>
                   <div className="wizard-template-desc">Serve static files + dispatch <code>.php</code> to a FastCGI backend</div>
+                </button>
+                <button
+                  type="button"
+                  className={`wizard-template-card${template === 'uwsgi' ? ' active' : ''}`}
+                  onClick={() => setTemplate('uwsgi')}
+                >
+                  <div className="wizard-template-name">Python / uWSGI</div>
+                  <div className="wizard-template-desc">Dispatch to a uWSGI backend (Django, Flask) + optional <code>/static/</code> alias</div>
                 </button>
               </div>
               <label>Domain name(s)</label>
@@ -301,6 +373,54 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
               </div>
             </div>
           )}
+          {step === 2 && template === 'uwsgi' && (
+            <div className="wizard-step">
+              <label>uWSGI backend (<code>uwsgi_pass</code>)</label>
+              <input
+                type="text"
+                value={uwsgiBackend}
+                onChange={(e) => setUwsgiBackend(e.target.value)}
+                placeholder="unix:/run/uwsgi/app.sock or 127.0.0.1:3031"
+                spellCheck={false}
+              />
+              <label>uwsgi_read_timeout</label>
+              <input
+                type="text"
+                value={uwsgiReadTimeout}
+                onChange={(e) => setUwsgiReadTimeout(e.target.value)}
+                placeholder="300s"
+                spellCheck={false}
+              />
+              <label className="wizard-check">
+                <input type="checkbox" checked={uwsgiServeStatic} onChange={(e) => setUwsgiServeStatic(e.target.checked)} />
+                Add a static-files alias served directly by nginx (bypasses uWSGI)
+              </label>
+              {uwsgiServeStatic && (
+                <>
+                  <label>Static URL prefix</label>
+                  <input
+                    type="text"
+                    value={uwsgiStaticUrl}
+                    onChange={(e) => setUwsgiStaticUrl(e.target.value)}
+                    placeholder="/static/"
+                    spellCheck={false}
+                  />
+                  <label>Static files root (<code>alias</code>)</label>
+                  <input
+                    type="text"
+                    value={uwsgiStaticRoot}
+                    onChange={(e) => setUwsgiStaticRoot(e.target.value)}
+                    placeholder="/var/www/app/static/"
+                    spellCheck={false}
+                  />
+                </>
+              )}
+              <div className="wizard-actions">
+                <button type="button" onClick={() => setStep(1)}>Back</button>
+                <button type="button" onClick={() => setStep(3)}>Next</button>
+              </div>
+            </div>
+          )}
           {step === 3 && (
             <div className="wizard-step">
               <label>SSL / Port</label>
@@ -328,7 +448,7 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
                   <button type="button" onClick={() => setStep(4)}>Next</button>
                 ) : (
                   <button type="button" className="wizard-finish" onClick={handleFinish}>
-                    Add PHP Site
+                    {template === 'uwsgi' ? 'Add Python / uWSGI Site' : 'Add PHP Site'}
                   </button>
                 )}
               </div>
