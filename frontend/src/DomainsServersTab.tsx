@@ -183,6 +183,13 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
   const [expandedIfBlocks, setExpandedIfBlocks] = useState<Record<string, boolean>>({})
   const [expandedAuth, setExpandedAuth] = useState<Record<string, boolean>>({})
   const [expandedErrorPages, setExpandedErrorPages] = useState<Record<string, boolean>>({})
+  // §42.2 — FastCGI section per-location collapse state; defaults to open when the location already uses fastcgi_pass
+  const [expandedFcgi, setExpandedFcgi] = useState<Record<string, boolean>>({})
+  // Collapse state for top-level block cards. Default behaviour: server/nested-location collapse state
+  // lives in these maps; `undefined` means "default expanded" (since users usually want to see a
+  // server's body on first load — contrast with the top-level location cards which default to collapsed).
+  const [collapsedServer, setCollapsedServer] = useState<Record<string, boolean>>({})
+  const [collapsedNestedLoc, setCollapsedNestedLoc] = useState<Record<string, boolean>>({})
   const [resolverIPInputs, setResolverIPInputs] = useState<Record<string, string>>({})
   // Draft row counts for row-based editors, keyed by `${blockId}:${editor}`.
   // Lets the UI show empty editable rows that aren't yet committed to the config
@@ -242,6 +249,16 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
       return za.replace('keys_zone=', '').split(':')[0]
     })
     .filter(Boolean)
+  // §42.5 — fastcgi_cache zones; nginx accepts either proxy_* or fastcgi_* zones
+  // for fastcgi_cache so we union both sources. fastcgi-declared zones come first.
+  const fcgiCacheOwnZoneNames = (httpBlock?.directives ?? [])
+    .filter((d) => d.name === 'fastcgi_cache_path')
+    .map((d) => {
+      const za = (d.args ?? []).find((a) => a.startsWith('keys_zone=')) ?? ''
+      return za.replace('keys_zone=', '').split(':')[0]
+    })
+    .filter(Boolean)
+  const fcgiCacheZoneNames = Array.from(new Set([...fcgiCacheOwnZoneNames, ...cacheZoneNames]))
 
   const updateServer = (serverId: string | undefined, fn: (s: Node) => Node) => {
     if (!serverId) return
@@ -540,31 +557,55 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                   }
             }
           >
-            <div className="server-card-header">
-              <label className="block-enabled-toggle">
-                <input
-                  type="checkbox"
-                  checked={server.enabled}
-                  onChange={(e) =>
-                    onUpdate((c) =>
-                      replaceNodeById(c, server.id, (n) => ({ ...n, enabled: e.target.checked }))
-                    )
-                  }
-                />
-              </label>
-              <span className="server-card-title">{titleName}</span>
-              {!readOnly && (
-                <button
-                  type="button"
-                  className="btn-delete-server"
-                  onClick={() => onUpdate((c) => removeNodeById(c, server.id))}
-                  title="Delete proxy host"
-                >
-                  Delete
-                </button>
-              )}
-            </div>
-
+            {(() => {
+              const serverKey = server.id ?? `server-${idx}`
+              const serverOpen = !(collapsedServer[serverKey] ?? false)
+              const listenSummary = getDirectiveArg(server, 'listen', 0)
+              const sslOn = (listenSummary || '').includes('ssl')
+              return (
+                <>
+                  <div className="server-card-header">
+                    <button
+                      type="button"
+                      className="block-collapse-toggle"
+                      onClick={() => setCollapsedServer((p) => ({ ...p, [serverKey]: serverOpen }))}
+                      title={serverOpen ? 'Collapse server' : 'Expand server'}
+                    >
+                      {serverOpen ? '▾' : '▸'}
+                    </button>
+                    <label className="block-enabled-toggle">
+                      <input
+                        type="checkbox"
+                        checked={server.enabled}
+                        onChange={(e) =>
+                          onUpdate((c) =>
+                            replaceNodeById(c, server.id, (n) => ({ ...n, enabled: e.target.checked }))
+                          )
+                        }
+                      />
+                    </label>
+                    <span className="server-card-title">{titleName}</span>
+                    {!serverOpen && (
+                      <span className="block-collapsed-summary">
+                        {listenSummary && <>listen <code>{listenSummary}</code></>}
+                        {serverNames.length > 1 && <> · {serverNames.length} names</>}
+                        {locations.length > 0 && <> · {locations.length} location{locations.length === 1 ? '' : 's'}</>}
+                        {sslOn && <> · SSL</>}
+                      </span>
+                    )}
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        className="btn-delete-server"
+                        onClick={() => onUpdate((c) => removeNodeById(c, server.id))}
+                        title="Delete proxy host"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                  {serverOpen && (
+                    <>
             {/* 9.1 server_name — tag input */}
             <div className="server-field">
               <label>
@@ -2854,6 +2895,489 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           </div>
                         </div>
 
+                        {/* §42.2 / §42.3 — FastCGI / PHP-FPM */}
+                        {(() => {
+                          const fcgiPass = getDirectiveArg(loc, 'fastcgi_pass', 0)
+                          const fcgiIndex = getDirectiveArg(loc, 'fastcgi_index', 0)
+                          const fcgiSplit = getDirectiveArg(loc, 'fastcgi_split_path_info', 0)
+                          const hasFcgiParams = (loc.directives ?? []).some(
+                            (d) => d.name === 'include' && d.args?.[0] === 'fastcgi_params',
+                          )
+                          const fcgiParamsCommitted = (loc.directives ?? [])
+                            .filter((d) => d.name === 'fastcgi_param')
+                            .map((d) => ({
+                              key: d.args?.[0] ?? '',
+                              value: d.args?.[1] ?? '',
+                              cond: d.args?.[2] ?? '',
+                            }))
+                          const fcgiParamDraftCount = getDrafts(loc.id, 'locFcgiParam')
+                          const fcgiParams = [
+                            ...fcgiParamsCommitted,
+                            ...Array.from({ length: fcgiParamDraftCount }, () => ({ key: '', value: '', cond: '' })),
+                          ]
+                          const fcgiConnT = getDirectiveArg(loc, 'fastcgi_connect_timeout', 0)
+                          const fcgiReadT = getDirectiveArg(loc, 'fastcgi_read_timeout', 0)
+                          const fcgiSendT = getDirectiveArg(loc, 'fastcgi_send_timeout', 0)
+                          // §42.4 — FastCGI buffers
+                          const fcgiBufSize = getDirectiveArg(loc, 'fastcgi_buffer_size', 0)
+                          const fcgiBuffersDir = (loc.directives ?? []).find((d) => d.name === 'fastcgi_buffers')
+                          const fcgiBuffersNum = fcgiBuffersDir?.args?.[0] ?? ''
+                          const fcgiBuffersSize = fcgiBuffersDir?.args?.[1] ?? ''
+                          const fcgiBusyBufSize = getDirectiveArg(loc, 'fastcgi_busy_buffers_size', 0)
+                          const fcgiMaxTempFile = getDirectiveArg(loc, 'fastcgi_max_temp_file_size', 0)
+                          // §42.5 — FastCGI cache (location level)
+                          const locFcgiCache = getDirectiveArg(loc, 'fastcgi_cache', 0)
+                          const locFcgiCacheKey = getDirectiveArg(loc, 'fastcgi_cache_key', 0)
+                          const locFcgiCacheValidDirs = (loc.directives ?? [])
+                            .filter((d) => d.name === 'fastcgi_cache_valid')
+                            .map((d) => ({ codes: (d.args ?? []).slice(0, -1).join(' '), duration: (d.args ?? []).slice(-1)[0] ?? '' }))
+                          const locFcgiCacheUseStale = getDirectiveArgs(loc, 'fastcgi_cache_use_stale')
+                          const fcgiKey = loc.id ?? `loc-${li}`
+                          const fcgiOpen = expandedFcgi[fcgiKey] ?? Boolean(fcgiPass || fcgiIndex || fcgiSplit || hasFcgiParams || fcgiParamsCommitted.length > 0)
+
+                          const writeFcgiParams = (rows: { key: string; value: string; cond: string }[]) => {
+                            const items = rows.map((r) => {
+                              const trimmedCond = r.cond?.trim() ?? ''
+                              const args = [r.key, r.value]
+                              if (trimmedCond) args.push(trimmedCond)
+                              return { args }
+                            })
+                            const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'fastcgi_param', items)
+                            const afterCommitted = items.filter((it) => it.args.some((a) => a.trim() !== '')).length
+                            syncDrafts(loc.id, 'locFcgiParam', fcgiParamsCommitted.length, afterCommitted)
+                            updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                          }
+
+                          const toggleInclude = (on: boolean) => {
+                            const dirs = (loc.directives ?? []).filter(
+                              (d) => !(d.name === 'include' && d.args?.[0] === 'fastcgi_params'),
+                            )
+                            if (on) {
+                              dirs.push({ type: 'directive', name: 'include', args: ['fastcgi_params'], enabled: true })
+                            }
+                            updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                          }
+
+                          return (
+                            <div className="fcgi-section">
+                              <button
+                                type="button"
+                                className="ssl-section-toggle"
+                                onClick={() => setExpandedFcgi((p) => ({ ...p, [fcgiKey]: !fcgiOpen }))}
+                              >
+                                {fcgiOpen ? '▾' : '▸'} FastCGI / PHP-FPM
+                                {Boolean(fcgiPass) && <span className="fcgi-badge"> {fcgiPass.startsWith('unix:') ? 'unix socket' : 'tcp'}</span>}
+                              </button>
+                              {fcgiOpen && (
+                                <div className="ssl-fields">
+                                  <div className="location-field">
+                                    <label>
+                                      fastcgi_pass
+                                      <InfoIcon text="Target PHP-FPM (or other FastCGI) backend. Unix socket form: `unix:/run/php/php8.2-fpm.sock`. TCP form: `127.0.0.1:9000`. Mutually useful with — not exclusive of — `proxy_pass`, but typically a location uses one backend flow." />
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={fcgiPass}
+                                      onChange={(e) =>
+                                        setLocationDirective(loc, 'fastcgi_pass', e.target.value ? [e.target.value] : [])
+                                      }
+                                      placeholder="unix:/run/php/php8.2-fpm.sock or 127.0.0.1:9000"
+                                      spellCheck={false}
+                                    />
+                                  </div>
+                                  <div className="location-field">
+                                    <label>
+                                      fastcgi_index
+                                      <InfoIcon text="Default index file appended to URIs that end with `/`. For PHP: `index.php`. Only takes effect when the URI maps to a directory." />
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={fcgiIndex}
+                                      onChange={(e) =>
+                                        setLocationDirective(loc, 'fastcgi_index', e.target.value ? [e.target.value] : [])
+                                      }
+                                      placeholder="index.php"
+                                      spellCheck={false}
+                                    />
+                                  </div>
+                                  <div className="location-field">
+                                    <label>
+                                      fastcgi_split_path_info
+                                      <InfoIcon text="Regex that splits the URI into SCRIPT_NAME and PATH_INFO halves. The PHP canonical value is `^(.+\.php)(/.+)$` — first capture sets $fastcgi_script_name, second sets $fastcgi_path_info. Pair with a `fastcgi_param PATH_INFO $fastcgi_path_info` row." />
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={fcgiSplit}
+                                      onChange={(e) =>
+                                        setLocationDirective(loc, 'fastcgi_split_path_info', e.target.value ? [e.target.value] : [])
+                                      }
+                                      placeholder="^(.+\.php)(/.+)$"
+                                      spellCheck={false}
+                                    />
+                                  </div>
+                                  <div className="location-field">
+                                    <label className="checkbox-label">
+                                      <input
+                                        type="checkbox"
+                                        checked={hasFcgiParams}
+                                        onChange={(e) => toggleInclude(e.target.checked)}
+                                      />
+                                      include fastcgi_params
+                                      <InfoIcon text="Pulls in the standard bundle of CGI environment variables (SCRIPT_FILENAME, QUERY_STRING, REQUEST_METHOD, etc.) from /etc/nginx/fastcgi_params. Almost always required for PHP. Add per-request overrides below via fastcgi_param." />
+                                    </label>
+                                  </div>
+
+                                  <div className="location-field">
+                                    <label>
+                                      fastcgi_param
+                                      <InfoIcon text="Per-request environment variable passed to the FastCGI backend. First column is the variable name, second is the value (usually an nginx variable like `$document_root$fastcgi_script_name`). Third column is optional — use `if_not_empty` to skip sending the variable when empty (e.g. HTTPS)." />
+                                    </label>
+                                    <div className="header-list">
+                                      {fcgiParams.map((p, pi) => (
+                                        <div key={pi} className="header-row fcgi-param-row">
+                                          <input
+                                            type="text"
+                                            placeholder="PARAM_NAME"
+                                            value={p.key}
+                                            onChange={(e) =>
+                                              writeFcgiParams(
+                                                fcgiParams.map((x, i) => (i === pi ? { ...x, key: e.target.value } : x)),
+                                              )
+                                            }
+                                            spellCheck={false}
+                                          />
+                                          <input
+                                            type="text"
+                                            placeholder="$value"
+                                            value={p.value}
+                                            onChange={(e) =>
+                                              writeFcgiParams(
+                                                fcgiParams.map((x, i) => (i === pi ? { ...x, value: e.target.value } : x)),
+                                              )
+                                            }
+                                            spellCheck={false}
+                                          />
+                                          <input
+                                            type="text"
+                                            placeholder="if_not_empty (optional)"
+                                            value={p.cond}
+                                            onChange={(e) =>
+                                              writeFcgiParams(
+                                                fcgiParams.map((x, i) => (i === pi ? { ...x, cond: e.target.value } : x)),
+                                              )
+                                            }
+                                            spellCheck={false}
+                                          />
+                                          <button
+                                            type="button"
+                                            className="btn-remove-header"
+                                            onClick={() =>
+                                              writeFcgiParams(fcgiParams.filter((_, i) => i !== pi))
+                                            }
+                                            title="Remove param"
+                                          >
+                                            ×
+                                          </button>
+                                        </div>
+                                      ))}
+                                      <div className="fcgi-param-presets">
+                                        <button
+                                          type="button"
+                                          className="btn-add-header"
+                                          onClick={() => addDraft(loc.id, 'locFcgiParam')}
+                                        >
+                                          + Add param
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn-preset"
+                                          onClick={() => {
+                                            const has = (k: string) => fcgiParamsCommitted.some((p) => p.key === k)
+                                            const extra: { key: string; value: string; cond: string }[] = []
+                                            if (!has('SCRIPT_FILENAME'))
+                                              extra.push({ key: 'SCRIPT_FILENAME', value: '$document_root$fastcgi_script_name', cond: '' })
+                                            if (!has('PATH_INFO'))
+                                              extra.push({ key: 'PATH_INFO', value: '$fastcgi_path_info', cond: '' })
+                                            if (!has('HTTPS'))
+                                              extra.push({ key: 'HTTPS', value: '$https', cond: 'if_not_empty' })
+                                            if (extra.length > 0) writeFcgiParams([...fcgiParamsCommitted, ...extra])
+                                          }}
+                                          title="Adds the common PHP params: SCRIPT_FILENAME, PATH_INFO, HTTPS"
+                                        >
+                                          + PHP defaults
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* §42.3 — FastCGI timeouts */}
+                                  <div className="loc-timeouts-row">
+                                    <div className="location-field">
+                                      <label>
+                                        fastcgi_connect_timeout
+                                        <InfoIcon text="How long nginx waits to establish the TCP/socket connection to the FastCGI backend. Default 60s. Cannot exceed 75s on most OSes. Lower for fast-fail on healthy local PHP-FPM; raise only if reaching the backend is slow." />
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={fcgiConnT}
+                                        onChange={(e) =>
+                                          setLocationDirective(loc, 'fastcgi_connect_timeout', e.target.value ? [e.target.value] : [])
+                                        }
+                                        placeholder="60s"
+                                      />
+                                    </div>
+                                    <div className="location-field">
+                                      <label>
+                                        fastcgi_read_timeout
+                                        <InfoIcon text="Max time between two successive reads from the FastCGI backend (not total request duration). Default 60s. PHP apps that run long reports/exports often need 300s or more — exceeding kills the connection with 504." />
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={fcgiReadT}
+                                        onChange={(e) =>
+                                          setLocationDirective(loc, 'fastcgi_read_timeout', e.target.value ? [e.target.value] : [])
+                                        }
+                                        placeholder="60s"
+                                      />
+                                    </div>
+                                    <div className="location-field">
+                                      <label>
+                                        fastcgi_send_timeout
+                                        <InfoIcon text="Max time between two successive writes to the FastCGI backend. Default 60s. Relevant for large file uploads posted to PHP." />
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={fcgiSendT}
+                                        onChange={(e) =>
+                                          setLocationDirective(loc, 'fastcgi_send_timeout', e.target.value ? [e.target.value] : [])
+                                        }
+                                        placeholder="60s"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {/* §42.4 — FastCGI buffers */}
+                                  <div className="loc-timeouts-row fcgi-buffers-row">
+                                    <div className="location-field">
+                                      <label>
+                                        fastcgi_buffer_size
+                                        <InfoIcon text="Size of the buffer used for the first part of the FastCGI response (headers). Default 4k/8k (page size). Raise to 16k or 32k if the backend sends large cookie sets or many response headers — otherwise the first read is truncated to the secondary buffers." />
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={fcgiBufSize}
+                                        onChange={(e) =>
+                                          setLocationDirective(loc, 'fastcgi_buffer_size', e.target.value ? [e.target.value] : [])
+                                        }
+                                        placeholder="16k"
+                                      />
+                                    </div>
+                                    <div className="location-field">
+                                      <label>
+                                        fastcgi_buffers
+                                        <InfoIcon text="Number and size of the secondary buffers for the FastCGI response body. Default 8 × page-size. Two inputs: count and unit size (e.g. 16 × 16k = 256k window). Too small causes disk spilling; too large wastes RAM per connection." />
+                                      </label>
+                                      <div className="fcgi-buffers-pair">
+                                        <input
+                                          type="text"
+                                          className="fcgi-buffers-num"
+                                          value={fcgiBuffersNum}
+                                          placeholder="16"
+                                          onChange={(e) => {
+                                            const num = e.target.value.trim()
+                                            const size = fcgiBuffersSize.trim()
+                                            if (!num && !size) {
+                                              removeLocationDirective(loc, 'fastcgi_buffers')
+                                            } else {
+                                              setLocationDirective(loc, 'fastcgi_buffers', [num, size || '16k'])
+                                            }
+                                          }}
+                                        />
+                                        <span className="fcgi-buffers-x">×</span>
+                                        <input
+                                          type="text"
+                                          value={fcgiBuffersSize}
+                                          placeholder="16k"
+                                          onChange={(e) => {
+                                            const num = fcgiBuffersNum.trim()
+                                            const size = e.target.value.trim()
+                                            if (!num && !size) {
+                                              removeLocationDirective(loc, 'fastcgi_buffers')
+                                            } else {
+                                              setLocationDirective(loc, 'fastcgi_buffers', [num || '16', size])
+                                            }
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="location-field">
+                                      <label>
+                                        fastcgi_busy_buffers_size
+                                        <InfoIcon text="Max size of buffers that can be busy sending data to the client while the backend is still writing. Typically 2 × fastcgi_buffer_size. Nginx rejects configs where this exceeds the total buffers minus one unit." />
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={fcgiBusyBufSize}
+                                        onChange={(e) =>
+                                          setLocationDirective(loc, 'fastcgi_busy_buffers_size', e.target.value ? [e.target.value] : [])
+                                        }
+                                        placeholder="32k"
+                                      />
+                                    </div>
+                                    <div className="location-field">
+                                      <label>
+                                        fastcgi_max_temp_file_size
+                                        <InfoIcon text="Cap on how much of a response nginx will spill to a temp file when buffers are full. Default 1024m. Set `0` to disable on-disk buffering entirely (useful when responses must stream — e.g. downloads — but fastcgi_buffers must be large enough to hold peak backpressure)." />
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={fcgiMaxTempFile}
+                                        onChange={(e) =>
+                                          setLocationDirective(loc, 'fastcgi_max_temp_file_size', e.target.value ? [e.target.value] : [])
+                                        }
+                                        placeholder="1024m or 0"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {/* §42.5 — FastCGI cache (location level) */}
+                                  <div className="location-field">
+                                    <label>
+                                      fastcgi_cache
+                                      <InfoIcon text="Name of a cache zone declared at HTTP level (see HTTP Settings → FastCGI Cache Zones, or any proxy_cache_path zone — nginx shares the on-disk format). Set to `off` to disable caching in this location. Responses are keyed by fastcgi_cache_key." />
+                                    </label>
+                                    <select
+                                      value={locFcgiCache}
+                                      onChange={(e) => setLocationDirective(loc, 'fastcgi_cache', e.target.value ? [e.target.value] : [])}
+                                    >
+                                      <option value="">— not set —</option>
+                                      <option value="off">off</option>
+                                      {fcgiCacheZoneNames.map((n) => (
+                                        <option key={n} value={n}>
+                                          {n}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  {locFcgiCache && locFcgiCache !== 'off' && (
+                                    <>
+                                      <div className="location-field">
+                                        <label>
+                                          fastcgi_cache_valid
+                                          <InfoIcon text="How long to cache each response status. Common: 200 301 10m (success + permanent redirect) · 404 1m (negative cache). Multiple rows allowed. Without any row, nginx only caches responses that carry Cache-Control/Expires headers." />
+                                        </label>
+                                        <div className="header-list">
+                                          {locFcgiCacheValidDirs.map((row, ri) => (
+                                            <div key={ri} className="header-row fcgi-cache-valid-row">
+                                              <input
+                                                type="text"
+                                                placeholder="200 301 302"
+                                                value={row.codes}
+                                                onChange={(e) => {
+                                                  const next = locFcgiCacheValidDirs.map((r, j) =>
+                                                    j === ri ? { ...r, codes: e.target.value } : r,
+                                                  )
+                                                  const items = next.map((r) => ({
+                                                    args: [...r.codes.split(/\s+/).filter(Boolean), r.duration].filter(Boolean),
+                                                  }))
+                                                  const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'fastcgi_cache_valid', items)
+                                                  updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                                                }}
+                                              />
+                                              <input
+                                                type="text"
+                                                placeholder="10m"
+                                                value={row.duration}
+                                                onChange={(e) => {
+                                                  const next = locFcgiCacheValidDirs.map((r, j) =>
+                                                    j === ri ? { ...r, duration: e.target.value } : r,
+                                                  )
+                                                  const items = next.map((r) => ({
+                                                    args: [...r.codes.split(/\s+/).filter(Boolean), r.duration].filter(Boolean),
+                                                  }))
+                                                  const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'fastcgi_cache_valid', items)
+                                                  updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                                                }}
+                                              />
+                                              <button
+                                                type="button"
+                                                className="btn-remove-header"
+                                                onClick={() => {
+                                                  const next = locFcgiCacheValidDirs.filter((_, j) => j !== ri)
+                                                  const items = next.map((r) => ({
+                                                    args: [...r.codes.split(/\s+/).filter(Boolean), r.duration].filter(Boolean),
+                                                  }))
+                                                  const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'fastcgi_cache_valid', items)
+                                                  updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                                                }}
+                                                title="Remove row"
+                                              >
+                                                ×
+                                              </button>
+                                            </div>
+                                          ))}
+                                          <button
+                                            type="button"
+                                            className="btn-add-header"
+                                            onClick={() => {
+                                              const next = [...locFcgiCacheValidDirs, { codes: '200 301', duration: '10m' }]
+                                              const items = next.map((r) => ({
+                                                args: [...r.codes.split(/\s+/).filter(Boolean), r.duration].filter(Boolean),
+                                              }))
+                                              const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'fastcgi_cache_valid', items)
+                                              updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                                            }}
+                                          >
+                                            + Add cache_valid rule
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <div className="location-field">
+                                        <label>
+                                          fastcgi_cache_key
+                                          <InfoIcon text="The string used as the cache key. Standard PHP key: `$scheme$request_method$host$request_uri`. Include session or auth variables here only if you intend to segment cached responses per-user (usually you don't — pair with fastcgi_cache_bypass instead)." />
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={locFcgiCacheKey}
+                                          onChange={(e) =>
+                                            setLocationDirective(loc, 'fastcgi_cache_key', e.target.value ? [e.target.value] : [])
+                                          }
+                                          placeholder="$scheme$request_method$host$request_uri"
+                                          spellCheck={false}
+                                        />
+                                      </div>
+                                      <div className="location-field">
+                                        <label>
+                                          fastcgi_cache_use_stale
+                                          <InfoIcon text="When the backend is failing, serve a stale cached copy under these conditions. `updating` alone gives cache-stampede protection; the error/timeout/http_5xx set turns nginx into a fallback layer that masks PHP-FPM outages." />
+                                        </label>
+                                        <div className="fcgi-use-stale-grid">
+                                          {['error', 'timeout', 'invalid_header', 'updating', 'http_500', 'http_502', 'http_503', 'http_504', 'http_403', 'http_404'].map((opt) => (
+                                            <label key={opt} className="checkbox-label">
+                                              <input
+                                                type="checkbox"
+                                                checked={locFcgiCacheUseStale.includes(opt)}
+                                                onChange={(e) => {
+                                                  const next = e.target.checked
+                                                    ? [...locFcgiCacheUseStale, opt]
+                                                    : locFcgiCacheUseStale.filter((x) => x !== opt)
+                                                  setLocationDirective(loc, 'fastcgi_cache_use_stale', next.length > 0 ? next : [])
+                                                }}
+                                              />
+                                              {opt}
+                                            </label>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
+
                         {/* F2.5 — Nested Location Blocks (depth 1) */}
                         {(() => {
                           const nestedLocs = (loc.directives ?? []).filter((d) => d.name === 'location')
@@ -2903,6 +3427,11 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                 )
               })}
             </div>
+                    </>
+                  )}
+                </>
+              )
+            })()}
           </div>
         )
       })}

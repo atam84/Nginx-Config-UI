@@ -1,7 +1,7 @@
 # Nginx Reverse Proxy Manager — Tasks Status
 
 **Project:** nginx-config-ui  
-**Last Updated:** 2026-04-18 (Phase 6 complete — top-nav polish, theme toggle, remote Open File, full theme-var migration; Phases 7–9 scoped and ready)
+**Last Updated:** 2026-04-18 (Phase 6 complete; §42 PHP/FastCGI complete; cross-tab block collapsibility added — all top-level cards now collapse with a summary line)
 **Source Documents:** `docs/Nginx_Reverse_Proxy_Manager_Arch.md`, `docs/Nginx_Reverse_Proxy_Manager_Technical.md`, `docs/gaps.md`, `docs/features.md`, `docs/nginx-topology.jsx`
 
 ---
@@ -581,6 +581,7 @@
 | 41.4 | "Open File" sidebar panel sub-modes: **Path** (server-local absolute), **Upload** (browser file picker → `parseConfigFromText`), **URL** (http/https fetch → parse) | Done |
 | 41.5 | Editor render gate: show structured tabs when an uploaded/URL config is loaded even without `selectedFile`/`openFilePath`; header label falls back to `Uploaded: <name>` / `URL: <url>` | Done |
 | 41.6 | Migrate hard-coded hovers (`rgba(255,255,255,…)`) and semantic colors (`#e3a008`, `#ef4444`, `#2ea043`, `#f85149`) to `--bg-hover` / `--warning` / `--error` / `--success` / `--accent-soft` vars across `ConfigEditor.css`, `DomainsServersTab.css`, `LogFormatBuilder.css`, `BlockContextMenu.css`, `NewProxyWizard.css`, `ErrorModal.css`, `HttpSettingsTab.css` | Done |
+| 41.7 | **Collapsible block cards everywhere**. Added `.block-collapse-toggle` + `.block-collapsed-summary` utility classes in `index.css` (always loaded). Wired a ▾/▸ toggle on: server cards (DomainsServersTab — collapsed summary shows `listen`, names count, locations count, SSL badge), upstream cards (UpstreamsTab — algorithm + server count + linked proxy hosts), stream upstream cards (server count), stream server cards (→ proxy target, UDP/SSL/ssl_preread flags), and mail server cards (ssl_protocols list). Default-expanded; state is per-card, not persisted. Nested-location cards deliberately skipped — they're already single-row editors with nothing to collapse. | Done |
 
 ---
 
@@ -594,12 +595,12 @@
 
 | ID | Task | Status |
 | :--- | :--- | :---: |
-| 42.1 | Parser/serializer round-trip test for `fastcgi_*` directives (unknown-directive preservation) | Pending |
-| 42.2 | Location card **FastCGI** section: `fastcgi_pass` (unix socket / tcp), `fastcgi_index`, `fastcgi_split_path_info`, `include fastcgi_params`, repeated `fastcgi_param` key-value editor | Pending |
-| 42.3 | FastCGI timeouts: `fastcgi_connect_timeout`, `fastcgi_read_timeout`, `fastcgi_send_timeout` | Pending |
-| 42.4 | FastCGI buffers: `fastcgi_buffer_size`, `fastcgi_buffers`, `fastcgi_busy_buffers_size`, `fastcgi_max_temp_file_size` | Pending |
-| 42.5 | FastCGI cache: HTTP-level `fastcgi_cache_path` zones + per-location `fastcgi_cache`, `fastcgi_cache_valid`, `fastcgi_cache_key`, `fastcgi_cache_use_stale` | Pending |
-| 42.6 | New Proxy Wizard: **"PHP / PHP-FPM site"** template — emits `root`, `index index.php`, `try_files $uri $uri/ /index.php?$query_string`, and a `location ~ \.php$ { fastcgi_pass … }` block | Pending |
+| 42.1 | Parser/serializer round-trip test for `fastcgi_*` directives (unknown-directive preservation); covers `fastcgi_pass` (unix/tcp), `fastcgi_param` with `if_not_empty` trailing arg, `fastcgi_cache_valid` with multi-status, quoted `fastcgi_cache_key`, and regex `fastcgi_split_path_info` — `TestParseSerializeRoundtrip_FastCGI` in `internal/serializer/serializer_test.go` | Done |
+| 42.2 | Location card **FastCGI** section (collapsible, auto-opens when `fastcgi_pass` or params already present): `fastcgi_pass` (unix socket / tcp), `fastcgi_index`, `fastcgi_split_path_info`, `include fastcgi_params` toggle, repeated `fastcgi_param` key-value editor (with optional `if_not_empty` third column), and a **+ PHP defaults** preset that seeds SCRIPT_FILENAME / PATH_INFO / HTTPS | Done |
+| 42.3 | FastCGI timeouts inside the same section: `fastcgi_connect_timeout`, `fastcgi_read_timeout`, `fastcgi_send_timeout` (three-column row matching the proxy timeouts layout) | Done |
+| 42.4 | FastCGI buffers row in Location FastCGI section: `fastcgi_buffer_size`, `fastcgi_buffers` (number × size pair widget), `fastcgi_busy_buffers_size`, `fastcgi_max_temp_file_size` | Done |
+| 42.5 | FastCGI cache: HTTP-level `fastcgi_cache_path` zones section (mirrors Proxy Cache Zones, sectionId `fcgicachezones`) + per-location `fastcgi_cache` dropdown (union of proxy_cache_path + fastcgi_cache_path zones), `fastcgi_cache_valid` row list, `fastcgi_cache_key`, `fastcgi_cache_use_stale` checkbox grid | Done |
+| 42.6 | NewProxyWizard gains **Template** step-1 selector (Reverse Proxy / PHP-FPM site). PHP path replaces Destination step with webroot + `fastcgi_pass` + index inputs and emits: `root`, `index`, `location / { try_files $uri $uri/ /index.php?$query_string; }`, `location ~ \.php$ { fastcgi_split_path_info, fastcgi_pass, fastcgi_index, include fastcgi_params, SCRIPT_FILENAME + PATH_INFO + HTTPS params, 300s read timeout, 16 × 16k buffers }`, and a `location ~ /\.` deny block. SSL step shared; WebSocket advanced step skipped in PHP mode. | Done |
 
 ---
 
@@ -829,10 +830,10 @@
 | **Subtotal (New)** | **131** | **0** | **0** | **131** | **0** |
 | | | | | | |
 | **Phase 6 — UX & Top-Nav Polish** | | | | | |
-| 41. Top-Nav, Theming, Remote File Sources (F6.1) | 6 | 0 | 0 | 6 | 0 |
+| 41. Top-Nav, Theming, Remote File Sources (F6.1) | 7 | 0 | 0 | 7 | 0 |
 | | | | | | |
 | **Phase 7 — Application Backend Activation** | | | | | |
-| 42. PHP / FastCGI Support (F7.1) | 6 | 6 | 0 | 0 | 0 |
+| 42. PHP / FastCGI Support (F7.1) | 6 | 0 | 0 | 6 | 0 |
 | 43. Python uWSGI Support (F7.2) | 2 | 2 | 0 | 0 | 0 |
 | 44. gRPC Support (F7.3) | 3 | 3 | 0 | 0 | 0 |
 | 45. Static Site / SPA Support (F7.4) | 7 | 7 | 0 | 0 | 0 |
@@ -850,6 +851,6 @@
 | 53. Ingress / Egress Dashboards (F9.1) | 5 | 5 | 0 | 0 | 0 |
 | 54. Ingress Advanced — Access & Traffic (F9.2) | 4 | 4 | 0 | 0 | 0 |
 | 55. Egress Tuning (F9.3) | 4 | 4 | 0 | 0 | 0 |
-| **Subtotal (Phases 6–9 — 2026-04-18 audit)** | **61** | **55** | **0** | **6** | **0** |
+| **Subtotal (Phases 6–9 — 2026-04-18 audit)** | **62** | **49** | **0** | **13** | **0** |
 | | | | | | |
-| **Grand Total** | **274** | **55** | **0** | **219** | **0** |
+| **Grand Total** | **275** | **49** | **0** | **226** | **0** |

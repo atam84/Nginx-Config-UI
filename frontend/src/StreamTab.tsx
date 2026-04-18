@@ -61,6 +61,7 @@ interface StreamUpstreamCardProps {
 }
 
 function StreamUpstreamCard({ upstream, onUpdate, readOnly }: StreamUpstreamCardProps) {
+  const [open, setOpen] = useState(true)
   const [newAddr, setNewAddr] = useState('')
   const name = upstream.args?.[0] ?? 'unnamed'
   const serverDirs = (upstream.directives ?? []).filter((d) => d.name === 'server')
@@ -94,6 +95,14 @@ function StreamUpstreamCard({ upstream, onUpdate, readOnly }: StreamUpstreamCard
   return (
     <div className={`stream-upstream-card ${!upstream.enabled ? 'block-disabled' : ''}`}>
       <div className="stream-card-header">
+        <button
+          type="button"
+          className="block-collapse-toggle"
+          onClick={() => setOpen((v) => !v)}
+          title={open ? 'Collapse upstream' : 'Expand upstream'}
+        >
+          {open ? '▾' : '▸'}
+        </button>
         {!readOnly && (
           <label className="stream-toggle-label" title="enabled">
             <input
@@ -115,6 +124,11 @@ function StreamUpstreamCard({ upstream, onUpdate, readOnly }: StreamUpstreamCard
           placeholder="upstream name"
           readOnly={readOnly}
         />
+        {!open && (
+          <span className="block-collapsed-summary">
+            {serverDirs.length} server{serverDirs.length === 1 ? '' : 's'}
+          </span>
+        )}
         {!readOnly && (
           <button
             type="button"
@@ -127,6 +141,7 @@ function StreamUpstreamCard({ upstream, onUpdate, readOnly }: StreamUpstreamCard
         )}
       </div>
 
+      {open && (<>
       <div className="stream-field">
         <label>Servers</label>
         <ul className="stream-server-list">
@@ -172,6 +187,7 @@ function StreamUpstreamCard({ upstream, onUpdate, readOnly }: StreamUpstreamCard
           </div>
         )}
       </div>
+      </>)}
     </div>
   )
 }
@@ -203,6 +219,7 @@ function buildStreamListen(port: string, udp: boolean, ssl: boolean): string[] {
 }
 
 function StreamServerCard({ server, onUpdate, readOnly }: StreamServerCardProps) {
+  const [open, setOpen] = useState(true)
   const listenArgs = server.directives?.find((d) => d.name === 'listen')?.args ?? []
   const { port, udp, ssl } = parseStreamListen(listenArgs)
   const proxyPass = getDirectiveArg(server, 'proxy_pass')
@@ -248,6 +265,14 @@ function StreamServerCard({ server, onUpdate, readOnly }: StreamServerCardProps)
   return (
     <div className={`stream-server-card ${!server.enabled ? 'block-disabled' : ''}`}>
       <div className="stream-card-header">
+        <button
+          type="button"
+          className="block-collapse-toggle"
+          onClick={() => setOpen((v) => !v)}
+          title={open ? 'Collapse server' : 'Expand server'}
+        >
+          {open ? '▾' : '▸'}
+        </button>
         {!readOnly && (
           <label className="stream-toggle-label" title="enabled">
             <input
@@ -260,6 +285,14 @@ function StreamServerCard({ server, onUpdate, readOnly }: StreamServerCardProps)
           </label>
         )}
         <span className="stream-card-title">listen {listenDisplay}</span>
+        {!open && (
+          <span className="block-collapsed-summary">
+            {proxyPass && <>→ <code>{proxyPass}</code></>}
+            {udp && <> · UDP</>}
+            {ssl && <> · SSL</>}
+            {sslPreread && <> · ssl_preread</>}
+          </span>
+        )}
         {!readOnly && (
           <button
             type="button"
@@ -272,6 +305,7 @@ function StreamServerCard({ server, onUpdate, readOnly }: StreamServerCardProps)
         )}
       </div>
 
+      {open && (<>
       <div className="stream-fields-row">
         <div className="stream-field">
           <label>Listen port / address</label>
@@ -357,6 +391,7 @@ function StreamServerCard({ server, onUpdate, readOnly }: StreamServerCardProps)
           />
         </div>
       </div>
+      </>)}
     </div>
   )
 }

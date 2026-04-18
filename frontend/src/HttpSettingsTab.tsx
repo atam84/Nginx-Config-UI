@@ -81,7 +81,7 @@ function buildCachePathArgs(z: { path: string; zoneName: string; zoneSize: strin
   return args
 }
 
-type SectionId = 'performance' | 'compression' | 'ssl' | 'logging' | 'realip' | 'includes' | 'maps' | 'ratelimit' | 'cachezones' | 'geo'
+type SectionId = 'performance' | 'compression' | 'ssl' | 'logging' | 'realip' | 'includes' | 'maps' | 'ratelimit' | 'cachezones' | 'fcgicachezones' | 'geo'
 
 // ─── Map block data ───────────────────────────────────────────────────────────
 
@@ -121,7 +121,7 @@ interface Props {
 
 export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props) {
   const [openSections, setOpenSections] = useState<Set<SectionId>>(
-    new Set<SectionId>(['performance', 'compression', 'ssl', 'logging', 'realip', 'includes', 'maps', 'ratelimit', 'cachezones', 'geo'])
+    new Set<SectionId>(['performance', 'compression', 'ssl', 'logging', 'realip', 'includes', 'maps', 'ratelimit', 'cachezones', 'fcgicachezones', 'geo'])
   )
   const [newRealIpEntry, setNewRealIpEntry] = useState('')
   const [newInclude, setNewInclude] = useState('')
@@ -130,6 +130,8 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
   const [newReqZone, setNewReqZone] = useState({ key: '$binary_remote_addr', name: '', size: '10m', rate: '10r/s' })
   const [newConnZone, setNewConnZone] = useState({ key: '$binary_remote_addr', name: '', size: '10m' })
   const [newCachePath, setNewCachePath] = useState({ path: '/var/cache/nginx', zoneName: '', zoneSize: '10m', levels: '1:2', maxSize: '1g', inactive: '60m' })
+  // §42.5 — parallel draft row for fastcgi_cache_path
+  const [newFcgiCachePath, setNewFcgiCachePath] = useState({ path: '/var/cache/nginx/fcgi', zoneName: '', zoneSize: '10m', levels: '1:2', maxSize: '1g', inactive: '60m' })
 
   const toggleSection = (s: SectionId) =>
     setOpenSections((prev) => {
@@ -272,8 +274,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
   const limitReqStatus = getArg(httpBlock, 'limit_req_status')
 
   // ── Cache Zones ──
-  const cachePaths = getAllByName(httpBlock, 'proxy_cache_path').map((d) => {
-    const args = d.args ?? []
+  const parseCachePathArgs = (args: string[]) => {
     const path = args[0] ?? ''
     const keysZoneArg = args.find((a) => a.startsWith('keys_zone=')) ?? ''
     const [kzName, kzSize] = keysZoneArg.replace('keys_zone=', '').split(':')
@@ -288,7 +289,10 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
       maxSize: maxSizeArg.replace('max_size=', '') || '',
       inactive: inactiveArg.replace('inactive=', '') || '',
     }
-  })
+  }
+  const cachePaths = getAllByName(httpBlock, 'proxy_cache_path').map((d) => parseCachePathArgs(d.args ?? []))
+  // §42.5 — FastCGI cache zones mirror proxy cache zones (same on-disk format).
+  const fcgiCachePaths = getAllByName(httpBlock, 'fastcgi_cache_path').map((d) => parseCachePathArgs(d.args ?? []))
 
   // ── Map blocks ──
   const mapBlocks = (httpBlock?.directives ?? []).filter((d) => d.name === 'map' && d.type === 'block')
@@ -1320,6 +1324,176 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
                     setNewCachePath({ path: '/var/cache/nginx', zoneName: '', zoneSize: '10m', levels: '1:2', maxSize: '1g', inactive: '60m' })
                   }}
                 >+ Add cache zone</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </CollapsibleSection>
+
+      {/* ── FastCGI Cache Zones (§42.5) ───────────────────────────────────── */}
+      <CollapsibleSection
+        id="fcgicachezones"
+        title="FastCGI Cache Zones"
+        info="`fastcgi_cache_path` declares on-disk cache areas for PHP-FPM / FastCGI responses. Locations opt in with `fastcgi_cache <zone>`. Uses the same on-disk format as proxy_cache_path — you can also point fastcgi_cache at a proxy_cache_path zone if you want to share storage."
+        open={openSections.has('fcgicachezones')}
+        onToggle={() => toggleSection('fcgicachezones')}
+      >
+        <div className="hs-field">
+          <div className="hs-list-header">
+            <label>fastcgi_cache_path <span className="hs-hint">FastCGI cache zone definitions</span></label>
+          </div>
+          {fcgiCachePaths.length === 0 && <p className="hs-empty">No FastCGI cache zones defined.</p>}
+          <div className="hs-list">
+            {fcgiCachePaths.map((z, i) => (
+              <div key={i} className="hs-cache-row">
+                <div className="hs-cache-row-top">
+                  <input
+                    type="text"
+                    value={z.path}
+                    placeholder="/var/cache/nginx/fcgi"
+                    readOnly={readOnly}
+                    className="hs-input-grow"
+                    onChange={(e) => {
+                      const next = fcgiCachePaths.map((r, j) => j === i ? { ...r, path: e.target.value } : r)
+                      setMulti('fastcgi_cache_path', next.map((r) => ({ args: buildCachePathArgs(r) })))
+                    }}
+                    title="Cache path"
+                  />
+                  <input
+                    type="text"
+                    value={z.zoneName}
+                    placeholder="zone name"
+                    readOnly={readOnly}
+                    className="hs-input-name"
+                    onChange={(e) => {
+                      const next = fcgiCachePaths.map((r, j) => j === i ? { ...r, zoneName: e.target.value } : r)
+                      setMulti('fastcgi_cache_path', next.map((r) => ({ args: buildCachePathArgs(r) })))
+                    }}
+                    title="keys_zone name"
+                  />
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      className="hs-btn-remove"
+                      onClick={() => setMulti('fastcgi_cache_path', fcgiCachePaths.filter((_, j) => j !== i).map((r) => ({ args: buildCachePathArgs(r) })))}
+                    >×</button>
+                  )}
+                </div>
+                <div className="hs-cache-row-bottom">
+                  <input
+                    type="text"
+                    value={z.zoneSize}
+                    placeholder="10m"
+                    readOnly={readOnly}
+                    className="hs-input-short"
+                    onChange={(e) => {
+                      const next = fcgiCachePaths.map((r, j) => j === i ? { ...r, zoneSize: e.target.value } : r)
+                      setMulti('fastcgi_cache_path', next.map((r) => ({ args: buildCachePathArgs(r) })))
+                    }}
+                    title="keys_zone size"
+                  />
+                  <input
+                    type="text"
+                    value={z.levels}
+                    placeholder="1:2"
+                    readOnly={readOnly}
+                    className="hs-input-short"
+                    onChange={(e) => {
+                      const next = fcgiCachePaths.map((r, j) => j === i ? { ...r, levels: e.target.value } : r)
+                      setMulti('fastcgi_cache_path', next.map((r) => ({ args: buildCachePathArgs(r) })))
+                    }}
+                    title="levels"
+                  />
+                  <input
+                    type="text"
+                    value={z.maxSize}
+                    placeholder="max_size (e.g. 1g)"
+                    readOnly={readOnly}
+                    className="hs-input-name"
+                    onChange={(e) => {
+                      const next = fcgiCachePaths.map((r, j) => j === i ? { ...r, maxSize: e.target.value } : r)
+                      setMulti('fastcgi_cache_path', next.map((r) => ({ args: buildCachePathArgs(r) })))
+                    }}
+                    title="max_size"
+                  />
+                  <input
+                    type="text"
+                    value={z.inactive}
+                    placeholder="inactive (e.g. 60m)"
+                    readOnly={readOnly}
+                    className="hs-input-name"
+                    onChange={(e) => {
+                      const next = fcgiCachePaths.map((r, j) => j === i ? { ...r, inactive: e.target.value } : r)
+                      setMulti('fastcgi_cache_path', next.map((r) => ({ args: buildCachePathArgs(r) })))
+                    }}
+                    title="inactive"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          {!readOnly && (
+            <div className="hs-cache-add">
+              <div className="hs-cache-row-top">
+                <input
+                  type="text"
+                  value={newFcgiCachePath.path}
+                  placeholder="/var/cache/nginx/fcgi"
+                  className="hs-input-grow"
+                  onChange={(e) => setNewFcgiCachePath((z) => ({ ...z, path: e.target.value }))}
+                  title="Cache path"
+                />
+                <input
+                  type="text"
+                  value={newFcgiCachePath.zoneName}
+                  placeholder="zone name"
+                  className="hs-input-name"
+                  onChange={(e) => setNewFcgiCachePath((z) => ({ ...z, zoneName: e.target.value }))}
+                  title="keys_zone name"
+                />
+              </div>
+              <div className="hs-cache-row-bottom">
+                <input
+                  type="text"
+                  value={newFcgiCachePath.zoneSize}
+                  placeholder="10m"
+                  className="hs-input-short"
+                  onChange={(e) => setNewFcgiCachePath((z) => ({ ...z, zoneSize: e.target.value }))}
+                  title="keys_zone size"
+                />
+                <input
+                  type="text"
+                  value={newFcgiCachePath.levels}
+                  placeholder="1:2"
+                  className="hs-input-short"
+                  onChange={(e) => setNewFcgiCachePath((z) => ({ ...z, levels: e.target.value }))}
+                  title="levels"
+                />
+                <input
+                  type="text"
+                  value={newFcgiCachePath.maxSize}
+                  placeholder="max_size"
+                  className="hs-input-name"
+                  onChange={(e) => setNewFcgiCachePath((z) => ({ ...z, maxSize: e.target.value }))}
+                  title="max_size"
+                />
+                <input
+                  type="text"
+                  value={newFcgiCachePath.inactive}
+                  placeholder="inactive"
+                  className="hs-input-name"
+                  onChange={(e) => setNewFcgiCachePath((z) => ({ ...z, inactive: e.target.value }))}
+                  title="inactive"
+                />
+                <button
+                  type="button"
+                  className="hs-btn-add"
+                  onClick={() => {
+                    if (!newFcgiCachePath.zoneName.trim()) return
+                    setMulti('fastcgi_cache_path', [...fcgiCachePaths, newFcgiCachePath].map((r) => ({ args: buildCachePathArgs(r) })))
+                    setNewFcgiCachePath({ path: '/var/cache/nginx/fcgi', zoneName: '', zoneSize: '10m', levels: '1:2', maxSize: '1g', inactive: '60m' })
+                  }}
+                >+ Add FastCGI cache zone</button>
               </div>
             </div>
           )}

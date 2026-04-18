@@ -62,6 +62,7 @@ const MAIL_PROTOCOLS = ['imap', 'pop3', 'smtp']
 const STARTTLS_OPTIONS = ['on', 'off', 'only']
 
 function MailServerCard({ server, onUpdate, readOnly }: MailServerCardProps) {
+  const [open, setOpen] = useState(true)
   const listenArgs = server.directives?.find((d) => d.name === 'listen')?.args ?? []
   const port = listenArgs.find((a) => /^\d+/.test(a)) ?? ''
   const ssl = listenArgs.includes('ssl')
@@ -103,6 +104,14 @@ function MailServerCard({ server, onUpdate, readOnly }: MailServerCardProps) {
   return (
     <div className={`mail-server-card ${!server.enabled ? 'mail-block-disabled' : ''}`}>
       <div className="mail-card-header">
+        <button
+          type="button"
+          className="block-collapse-toggle"
+          onClick={() => setOpen((v) => !v)}
+          title={open ? 'Collapse server' : 'Expand server'}
+        >
+          {open ? '▾' : '▸'}
+        </button>
         {!readOnly && (
           <label className="mail-toggle-label" title="enabled">
             <input
@@ -115,6 +124,11 @@ function MailServerCard({ server, onUpdate, readOnly }: MailServerCardProps) {
         <span className="mail-card-title">
           {protocol.toUpperCase()} :{port || '?'}{ssl ? ' (SSL)' : ''}
         </span>
+        {!open && sslProtos.length > 0 && (
+          <span className="block-collapsed-summary">
+            {sslProtos.join(', ')}
+          </span>
+        )}
         {!readOnly && (
           <button
             type="button"
@@ -126,6 +140,7 @@ function MailServerCard({ server, onUpdate, readOnly }: MailServerCardProps) {
         )}
       </div>
 
+      {open && (<>
       <div className="mail-fields-row">
         <div className="mail-field">
           <label>protocol</label>
@@ -264,6 +279,7 @@ function MailServerCard({ server, onUpdate, readOnly }: MailServerCardProps) {
           />
         </div>
       </div>
+      </>)}
     </div>
   )
 }

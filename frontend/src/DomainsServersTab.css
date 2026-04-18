@@ -901,3 +901,86 @@
   color: var(--text);
   border-radius: 6px;
 }
+
+/* §42.2 / §42.3 — FastCGI section */
+.fcgi-section {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border);
+}
+
+.fcgi-badge {
+  font-size: 0.7rem;
+  font-weight: normal;
+  color: var(--text-muted);
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.fcgi-param-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 0.9fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.fcgi-param-row input {
+  min-width: 0;
+}
+
+.fcgi-param-presets {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.fcgi-buffers-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.fcgi-buffers-pair {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.fcgi-buffers-pair input {
+  min-width: 0;
+  flex: 1;
+}
+
+.fcgi-buffers-pair .fcgi-buffers-num {
+  max-width: 3.5rem;
+  flex: 0 0 auto;
+}
+
+.fcgi-buffers-x {
+  color: var(--text-muted);
+  user-select: none;
+  font-size: 0.8rem;
+}
+
+.fcgi-cache-valid-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.fcgi-use-stale-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.3rem 0.75rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.fcgi-use-stale-grid .checkbox-label {
+  font-size: 0.8rem;
+}

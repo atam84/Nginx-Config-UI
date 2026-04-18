@@ -131,6 +131,8 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
   const [newServerAddrByUpstream, setNewServerAddrByUpstream] = useState<Record<string, string>>({})
   const [draggedIndex, setDraggedIndex] = useState<{ upId: string; i: number } | null>(null)
   const [contextMenu, setContextMenu] = useState<{ up: Node; x: number; y: number } | null>(null)
+  // Upstream card collapse state; default expanded (undefined → open).
+  const [collapsedUpstream, setCollapsedUpstream] = useState<Record<string, boolean>>({})
 
   const getNewServerAddr = (upId: string) => newServerAddrByUpstream[upId] ?? ''
   const setNewServerAddr = (upId: string, v: string) =>
@@ -332,55 +334,76 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
                   }
             }
           >
-            <div className="upstream-card-header">
-              {!readOnly && (
-                <label className="block-enabled-toggle">
-                  <input
-                    type="checkbox"
-                    checked={up.enabled}
-                    onChange={(e) =>
-                      onUpdate((c) =>
-                        replaceNodeById(c, up.id, (n) => ({ ...n, enabled: e.target.checked }))
-                      )
-                    }
-                  />
-                </label>
-              )}
-              <input
-                type="text"
-                className="upstream-name-input"
-                value={name}
-                onChange={(e) =>
-                  updateUpstream(up.id, (u) => ({
-                    ...u,
-                    args: [e.target.value || 'backend'],
-                  }))
-                }
-                placeholder="upstream name"
-                readOnly={readOnly}
-              />
-              {!readOnly && (
-                <button
-                  type="button"
-                  className="btn-delete-upstream"
-                  onClick={() => onUpdate((c) => removeNodeById(c, up.id))}
-                  title="Delete upstream"
-                >
-                  Delete
-                </button>
-              )}
-              {!readOnly && onAddProxyHost && (
-                <button
-                  type="button"
-                  className="btn-add-proxy inline"
-                  title="Create proxy host using this upstream"
-                  onClick={() => onAddProxyHost(name)}
-                >
-                  + proxy host
-                </button>
-              )}
-            </div>
-
+            {(() => {
+              const upKey = up.id ?? name
+              const upOpen = !(collapsedUpstream[upKey] ?? false)
+              const upServerCount = getServerDirectives(up).length
+              return (
+                <>
+                  <div className="upstream-card-header">
+                    <button
+                      type="button"
+                      className="block-collapse-toggle"
+                      onClick={() => setCollapsedUpstream((p) => ({ ...p, [upKey]: upOpen }))}
+                      title={upOpen ? 'Collapse upstream' : 'Expand upstream'}
+                    >
+                      {upOpen ? '▾' : '▸'}
+                    </button>
+                    {!readOnly && (
+                      <label className="block-enabled-toggle">
+                        <input
+                          type="checkbox"
+                          checked={up.enabled}
+                          onChange={(e) =>
+                            onUpdate((c) =>
+                              replaceNodeById(c, up.id, (n) => ({ ...n, enabled: e.target.checked }))
+                            )
+                          }
+                        />
+                      </label>
+                    )}
+                    <input
+                      type="text"
+                      className="upstream-name-input"
+                      value={name}
+                      onChange={(e) =>
+                        updateUpstream(up.id, (u) => ({
+                          ...u,
+                          args: [e.target.value || 'backend'],
+                        }))
+                      }
+                      placeholder="upstream name"
+                      readOnly={readOnly}
+                    />
+                    {!upOpen && (
+                      <span className="block-collapsed-summary">
+                        <code>{algo}</code> · {upServerCount} server{upServerCount === 1 ? '' : 's'}
+                        {linkedProxyHosts.length > 0 && <> · used by {linkedProxyHosts.length}</>}
+                      </span>
+                    )}
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        className="btn-delete-upstream"
+                        onClick={() => onUpdate((c) => removeNodeById(c, up.id))}
+                        title="Delete upstream"
+                      >
+                        Delete
+                      </button>
+                    )}
+                    {!readOnly && onAddProxyHost && (
+                      <button
+                        type="button"
+                        className="btn-add-proxy inline"
+                        title="Create proxy host using this upstream"
+                        onClick={() => onAddProxyHost(name)}
+                      >
+                        + proxy host
+                      </button>
+                    )}
+                  </div>
+                  {upOpen && (
+                    <>
             <div className="upstream-field">
               <label>
                 Load Balancing
@@ -589,6 +612,11 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
                 })}
               </ul>
             </div>
+                    </>
+                  )}
+                </>
+              )
+            })()}
           </div>
         )
       })}
