@@ -231,7 +231,7 @@
 .letsencrypt-section {
   margin-top: 0.75rem;
   padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-hover);
   border: 1px solid var(--border);
   border-radius: 6px;
 }
@@ -257,17 +257,17 @@
 
 .cert-badge-valid {
   background: rgba(46, 160, 67, 0.2);
-  color: #2ea043;
+  color: var(--success);
 }
 
 .cert-badge-expiring_soon {
   background: rgba(230, 162, 60, 0.2);
-  color: #e3a008;
+  color: var(--warning);
 }
 
 .cert-badge-expired {
   background: rgba(248, 81, 73, 0.2);
-  color: #f85149;
+  color: var(--error);
 }
 
 .letsencrypt-form {
@@ -317,7 +317,7 @@
 
 .btn-le-renew {
   background: rgba(46, 160, 67, 0.15);
-  color: #2ea043;
+  color: var(--success);
   border: 1px solid rgba(46, 160, 67, 0.3);
 }
 
@@ -326,7 +326,7 @@
 }
 
 .btn-le-cancel {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-hover);
   color: var(--text-muted);
   border: 1px solid var(--border);
 }
@@ -349,13 +349,13 @@
 
 .le-ok {
   background: rgba(46, 160, 67, 0.12);
-  color: #2ea043;
+  color: var(--success);
   border: 1px solid rgba(46, 160, 67, 0.25);
 }
 
 .le-err {
   background: rgba(248, 81, 73, 0.1);
-  color: #f85149;
+  color: var(--error);
   border: 1px solid rgba(248, 81, 73, 0.25);
 }
 

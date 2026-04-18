@@ -17,6 +17,7 @@ import {
   openFileByPath,
   saveFileByPath,
   formatConfig,
+  parseConfigFromText,
   type ConfigFile,
   type ConfigFileInfo,
   type Node,
@@ -169,6 +170,10 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
   const [sourceMode, setSourceMode] = useState<SourceMode>('local')
   const [openFilePath, setOpenFilePath] = useState('')
   const [openFileInput, setOpenFileInput] = useState('')
+  const [openFileSubMode, setOpenFileSubMode] = useState<'path' | 'upload' | 'url'>('path')
+  const [openUrlInput, setOpenUrlInput] = useState('')
+  const [loadedLabel, setLoadedLabel] = useState<string | null>(null)
+  const openFileInputRef = useRef<HTMLInputElement>(null)
   // Save As dialog
   const [showSaveAs, setShowSaveAs] = useState(false)
   const [saveAsMode, setSaveAsMode] = useState<'local' | 'path'>('path')
@@ -350,9 +355,67 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
       setOriginalConfig(c)
       setOpenFilePath(path)
       setSelectedFile(null)
+      setLoadedLabel(null)
       clearHistory()
     } catch (e) {
       setError({ title: 'Open failed', message: e instanceof Error ? e.message : 'Failed to open file' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleUploadConfigFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLoading(true)
+    setError(null)
+    try {
+      const text = await file.text()
+      const c = await parseConfigFromText(text)
+      c.file_path = ''
+      setConfig(c)
+      setOriginalConfig(c)
+      setOpenFilePath('')
+      setSelectedFile(null)
+      setLoadedLabel(file.name ? `Uploaded: ${file.name}` : 'Uploaded config')
+      clearHistory()
+    } catch (err) {
+      setError({ title: 'Upload failed', message: err instanceof Error ? err.message : 'Failed to parse file' })
+    } finally {
+      setLoading(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleFetchFromUrl = async () => {
+    const url = openUrlInput.trim()
+    if (!url) return
+    if (!/^https?:\/\//i.test(url)) {
+      setError({ title: 'Invalid URL', message: 'URL must start with http:// or https://' })
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`Fetch failed (${res.status})`)
+      const text = await res.text()
+      const c = await parseConfigFromText(text)
+      c.file_path = ''
+      setConfig(c)
+      setOriginalConfig(c)
+      setOpenFilePath('')
+      setSelectedFile(null)
+      setLoadedLabel(`URL: ${url}`)
+      clearHistory()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to fetch URL'
+      setError({
+        title: 'Fetch failed',
+        message: msg.includes('Failed to fetch')
+          ? `${msg}\n\nThe target server may block browser requests (CORS). Try downloading the file and using Upload instead.`
+          : msg,
+      })
     } finally {
       setLoading(false)
     }
@@ -364,6 +427,7 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
     setOriginalConfig(c)
     setSelectedFile(null)
     setOpenFilePath('')
+    setLoadedLabel(null)
     clearHistory()
   }
 
@@ -751,7 +815,7 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
                       selectedFile === f.path ? 'selected' : '',
                       dirtyFiles.has(f.path) ? 'dirty' : '',
                     ].filter(Boolean).join(' ')}
-                    onClick={() => { setSelectedFile(f.path); setOpenFilePath('') }}
+                    onClick={() => { setSelectedFile(f.path); setOpenFilePath(''); setLoadedLabel(null) }}
                     onContextMenu={readOnly ? undefined : (e) => handleFileContextMenu(e, f.path, f.status)}
                   >
                     <span className="file-path">{f.path}</span>
@@ -770,23 +834,91 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
         {sourceMode === 'file' && (
           <div className="sidebar-panel">
             <div className="sidebar-panel-title">Open Config File</div>
-            <div className="open-file-form">
-              <label>File path</label>
-              <input
-                type="text"
-                value={openFileInput}
-                onChange={(e) => setOpenFileInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleOpenFile()}
-                placeholder="/etc/nginx/nginx.conf"
-                spellCheck={false}
-              />
-              <button type="button" onClick={handleOpenFile} disabled={!openFileInput.trim() || loading}>
-                {loading ? 'Opening…' : 'Open'}
-              </button>
-              {openFilePath && (
-                <div className="open-file-current">Opened: {openFilePath}</div>
-              )}
+            <div className="open-file-submodes">
+              <button
+                type="button"
+                className={openFileSubMode === 'path' ? 'active' : ''}
+                onClick={() => setOpenFileSubMode('path')}
+                title="Open a file by absolute path on this server"
+              >Path</button>
+              <button
+                type="button"
+                className={openFileSubMode === 'upload' ? 'active' : ''}
+                onClick={() => setOpenFileSubMode('upload')}
+                title="Upload a file from your computer"
+              >Upload</button>
+              <button
+                type="button"
+                className={openFileSubMode === 'url' ? 'active' : ''}
+                onClick={() => setOpenFileSubMode('url')}
+                title="Fetch a config from a URL (http/https)"
+              >URL</button>
             </div>
+
+            {openFileSubMode === 'path' && (
+              <div className="open-file-form">
+                <label>Server-local path</label>
+                <input
+                  type="text"
+                  value={openFileInput}
+                  onChange={(e) => setOpenFileInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleOpenFile()}
+                  placeholder="/etc/nginx/nginx.conf"
+                  spellCheck={false}
+                />
+                <button type="button" onClick={handleOpenFile} disabled={!openFileInput.trim() || loading}>
+                  {loading ? 'Opening…' : 'Open'}
+                </button>
+                {openFilePath && (
+                  <div className="open-file-current">Opened: {openFilePath}</div>
+                )}
+              </div>
+            )}
+
+            {openFileSubMode === 'upload' && (
+              <div className="open-file-form">
+                <label>Upload from your computer</label>
+                <p className="open-file-hint">
+                  Parse a <code>.conf</code> file you have locally, then save it
+                  anywhere using <b>Save As</b>.
+                </p>
+                <input
+                  ref={openFileInputRef}
+                  type="file"
+                  accept=".conf,.nginx,text/plain"
+                  className="hidden-file-input"
+                  onChange={handleUploadConfigFile}
+                />
+                <button
+                  type="button"
+                  onClick={() => openFileInputRef.current?.click()}
+                  disabled={loading}
+                >
+                  {loading ? 'Parsing…' : 'Choose file…'}
+                </button>
+              </div>
+            )}
+
+            {openFileSubMode === 'url' && (
+              <div className="open-file-form">
+                <label>Fetch from URL</label>
+                <p className="open-file-hint">
+                  Fetches a remote config (http/https). The target must allow
+                  CORS, or use Upload instead.
+                </p>
+                <input
+                  type="text"
+                  value={openUrlInput}
+                  onChange={(e) => setOpenUrlInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleFetchFromUrl()}
+                  placeholder="https://example.com/nginx.conf"
+                  spellCheck={false}
+                />
+                <button type="button" onClick={handleFetchFromUrl} disabled={!openUrlInput.trim() || loading}>
+                  {loading ? 'Fetching…' : 'Fetch'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -922,12 +1054,12 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
           />
         </div>
 
-        {config && (selectedFile || openFilePath || sourceMode === 'new') && (
+        {config && (
           <>
             <div className="editor-header">
               <div className="editor-header-top">
                 <h2 className={!selectedFile && !openFilePath ? 'config-title-new' : ''}>
-                  {selectedFile || openFilePath || 'New Config'}
+                  {selectedFile || openFilePath || loadedLabel || 'New Config'}
                 </h2>
                 <div className="header-actions">
                   <button

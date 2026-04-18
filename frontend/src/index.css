@@ -1,13 +1,38 @@
-:root {
+:root,
+:root[data-theme='dark'] {
   --bg: #0d1117;
   --bg-card: #161b22;
+  --bg-hover: rgba(255, 255, 255, 0.04);
   --border: #30363d;
   --text: #e6edf3;
   --text-muted: #8b949e;
   --accent: #58a6ff;
+  --accent-soft: rgba(88, 166, 255, 0.15);
   --success: #3fb950;
+  --warning: #e3a008;
   --error: #f85149;
+  --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.4);
   --font-sans: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+}
+
+:root[data-theme='light'] {
+  --bg: #f6f8fa;
+  --bg-card: #ffffff;
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --border: #d0d7de;
+  --text: #1f2328;
+  --text-muted: #656d76;
+  --accent: #0969da;
+  --accent-soft: rgba(9, 105, 218, 0.12);
+  --success: #1a7f37;
+  --warning: #9a6700;
+  --error: #cf222e;
+  --shadow-modal: 0 8px 32px rgba(31, 35, 40, 0.18);
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 * {

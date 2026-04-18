@@ -111,7 +111,7 @@
 
 .file-list .file-status.dirty {
   background: transparent;
-  color: #e3a008;
+  color: var(--warning);
   font-size: 0.75rem;
   padding: 0;
 }
@@ -121,7 +121,7 @@
 }
 
 .file-list li:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-hover);
 }
 
 .file-list li.selected {
@@ -230,7 +230,7 @@
 }
 
 .file-context-menu button:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-hover);
 }
 
 .file-context-menu button.danger {
@@ -284,7 +284,7 @@
 }
 
 .btn-save.btn-dirty {
-  background: #e3a008;
+  background: var(--warning);
 }
 
 .tabs {
@@ -370,6 +370,51 @@
 }
 
 /* Open File panel */
+
+.open-file-submodes {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.6rem;
+}
+
+.open-file-submodes button {
+  flex: 1;
+  font-family: inherit;
+  font-size: 0.7rem;
+  padding: 0.3rem 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.open-file-submodes button:hover {
+  color: var(--text);
+}
+
+.open-file-submodes button.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.open-file-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.open-file-hint code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.68rem;
+  padding: 0 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+}
 
 .open-file-form {
   display: flex;

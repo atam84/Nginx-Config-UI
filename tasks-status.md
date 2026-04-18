@@ -1,7 +1,7 @@
 # Nginx Reverse Proxy Manager — Tasks Status
 
 **Project:** nginx-config-ui  
-**Last Updated:** 2026-03-30 (Phase 5 complete — all tasks done)
+**Last Updated:** 2026-04-18 (Phase 6 complete — top-nav polish, theme toggle, remote Open File, full theme-var migration; Phases 7–9 scoped and ready)
 **Source Documents:** `docs/Nginx_Reverse_Proxy_Manager_Arch.md`, `docs/Nginx_Reverse_Proxy_Manager_Technical.md`, `docs/gaps.md`, `docs/features.md`, `docs/nginx-topology.jsx`
 
 ---
@@ -567,6 +567,214 @@
 
 ---
 
+## Phase 6 — UX & Top-Nav Polish
+
+## 41. Top-Nav, Theming, Remote File Sources (F6.1)
+
+**Scope:** Frontend · **Driver:** In-app ergonomics (theme, About, Help, open remote files).
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 41.1 | Top-nav **About** button + modal (app description, stack, docs link) | Done |
+| 41.2 | Top-nav **Help** button + modal with nginx version compatibility table (1.18 / 1.24 / 1.26 / 1.27 mainline; OpenResty/Tengine partial via Raw) | Done |
+| 41.3 | Dark / Light **theme toggle** in top-nav, persisted in `localStorage`, honours `prefers-color-scheme` on first visit | Done |
+| 41.4 | "Open File" sidebar panel sub-modes: **Path** (server-local absolute), **Upload** (browser file picker → `parseConfigFromText`), **URL** (http/https fetch → parse) | Done |
+| 41.5 | Editor render gate: show structured tabs when an uploaded/URL config is loaded even without `selectedFile`/`openFilePath`; header label falls back to `Uploaded: <name>` / `URL: <url>` | Done |
+| 41.6 | Migrate hard-coded hovers (`rgba(255,255,255,…)`) and semantic colors (`#e3a008`, `#ef4444`, `#2ea043`, `#f85149`) to `--bg-hover` / `--warning` / `--error` / `--success` / `--accent-soft` vars across `ConfigEditor.css`, `DomainsServersTab.css`, `LogFormatBuilder.css`, `BlockContextMenu.css`, `NewProxyWizard.css`, `ErrorModal.css`, `HttpSettingsTab.css` | Done |
+
+---
+
+## Phase 7 — Application Backend Activation & Configuration
+
+**Driver:** Today the UI can only configure HTTP reverse-proxy flows (`proxy_pass`). The sample repo already ships a `fastcgi.conf` that is **only editable via Raw**. Real deployments need first-class support for PHP-FPM, Python (uWSGI + ASGI), Node.js, gRPC, and static/SPA serving.
+
+## 42. PHP / FastCGI Support (F7.1)
+
+**Gap Ref:** (new) — closes the PHP configuration gap identified in the 2026-04-18 audit · **Scope:** Both · **Sample:** `config-samples/fastcgi.conf`
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 42.1 | Parser/serializer round-trip test for `fastcgi_*` directives (unknown-directive preservation) | Pending |
+| 42.2 | Location card **FastCGI** section: `fastcgi_pass` (unix socket / tcp), `fastcgi_index`, `fastcgi_split_path_info`, `include fastcgi_params`, repeated `fastcgi_param` key-value editor | Pending |
+| 42.3 | FastCGI timeouts: `fastcgi_connect_timeout`, `fastcgi_read_timeout`, `fastcgi_send_timeout` | Pending |
+| 42.4 | FastCGI buffers: `fastcgi_buffer_size`, `fastcgi_buffers`, `fastcgi_busy_buffers_size`, `fastcgi_max_temp_file_size` | Pending |
+| 42.5 | FastCGI cache: HTTP-level `fastcgi_cache_path` zones + per-location `fastcgi_cache`, `fastcgi_cache_valid`, `fastcgi_cache_key`, `fastcgi_cache_use_stale` | Pending |
+| 42.6 | New Proxy Wizard: **"PHP / PHP-FPM site"** template — emits `root`, `index index.php`, `try_files $uri $uri/ /index.php?$query_string`, and a `location ~ \.php$ { fastcgi_pass … }` block | Pending |
+
+---
+
+## 43. Python uWSGI Support (F7.2)
+
+**Gap Ref:** (new) · **Scope:** Both
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 43.1 | Location card **uWSGI** section: `uwsgi_pass`, `include uwsgi_params`, `uwsgi_param` key-value editor, `uwsgi_read_timeout`, `uwsgi_buffers` | Pending |
+| 43.2 | New Proxy Wizard: **"Python / uWSGI (Django/Flask)"** template | Pending |
+
+---
+
+## 44. gRPC Support (F7.3)
+
+**Gap Ref:** (new) · **Scope:** Both
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 44.1 | Location card **gRPC** section: `grpc_pass`, `grpc_set_header`, `grpc_read_timeout`, `grpc_send_timeout`, `grpc_ssl_*` | Pending |
+| 44.2 | Auto-enforce `http2` flag on `listen` when a server contains `grpc_pass` (UI warning if missing) | Pending |
+| 44.3 | New Proxy Wizard: **"gRPC service"** template | Pending |
+
+---
+
+## 45. Static Site / SPA Support (F7.4)
+
+**Gap Ref:** (new) — covers the highest-frequency missing pattern · **Scope:** Frontend
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 45.1 | Location card: `root`, `alias`, `index` fields (root currently only at server level; `alias` missing) | Pending |
+| 45.2 | Location card: `try_files` arg-list editor with reorderable entries (`$uri`, `$uri/`, `/index.html`, `=404`, etc.) | Pending |
+| 45.3 | Server card: `error_page` table — status-code list + target URI/URL, including `=200` / `=code` rewrite form | Pending |
+| 45.4 | Location card: `expires` + `Cache-Control add_header` preset for static-asset caching | Pending |
+| 45.5 | Optional: per-location `types {}` override editor for MIME corrections | Pending |
+| 45.6 | New Proxy Wizard: **"Static site"** template (root + `try_files $uri $uri/ /index.html`) | Pending |
+| 45.7 | New Proxy Wizard: **"SPA (SSR + static)"** template (proxy SSR backend + `location /_next/static { … }` passthrough) | Pending |
+
+---
+
+## 46. Node.js / ASGI Wizard Templates (F7.5)
+
+**Gap Ref:** (new) · **Scope:** Frontend · **Dependencies:** 11.1 (wizard), 45
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 46.1 | Wizard template: **"Node.js (Next.js/Nuxt/Remix)"** — proxy_pass + WebSocket upgrade + `/_next/static` pass-through + HMR-safe timeouts | Pending |
+| 46.2 | Wizard template: **"Python ASGI (FastAPI / Django Channels / Starlette)"** — proxy_pass + WebSocket upgrade + long `proxy_read_timeout` preset | Pending |
+| 46.3 | Wizard template: **"Go / generic HTTP service"** — minimal proxy_pass with sensible timeouts | Pending |
+
+---
+
+## 47. `return` / Redirect Helper at Location Level (F7.6)
+
+**Gap Ref:** (new) — partial at server level via SSL-redirect toggle (9.7); missing at location level · **Scope:** Frontend
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 47.1 | Location card **Return** section: code select (200, 301, 302, 307, 308, 403, 404, 410, 444) + URL/text body | Pending |
+| 47.2 | Server card: **"Redirect all traffic to …"** helper (emits canonical `location / { return 301 $scheme://host$request_uri; }`) | Pending |
+| 47.3 | Disambiguate `return` vs. `rewrite ... redirect/permanent` in the UI with inline help | Pending |
+
+---
+
+## 48. CORS Preset (F7.7)
+
+**Gap Ref:** (new) · **Scope:** Frontend · **Dependencies:** 19 (F1.5 add_header)
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 48.1 | "Apply CORS" preset on server/location: `Access-Control-Allow-Origin`, `-Methods`, `-Headers`, `-Credentials`, `-Max-Age` | Pending |
+| 48.2 | Preflight OPTIONS handler insertion: `if ($request_method = OPTIONS) { add_header ...; return 204; }` with warning about "if is evil" | Pending |
+| 48.3 | Origin policy modes: Any (`*`), Echo (`$http_origin` w/ whitelist var), Explicit list | Pending |
+
+---
+
+## Phase 8 — Security, Routing Variants & Modern Protocols
+
+## 49. `geo` & `split_clients` Block Editors (F8.1)
+
+**Gap Ref:** (new) — complements `map` editor from F2.4 · **Scope:** Both
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 49.1 | `geo {}` editor: source variable (default `$remote_addr`) + CIDR → value rows | Pending |
+| 49.2 | `split_clients {}` editor: source key + percentage → value rows (A/B testing) | Pending |
+| 49.3 | Cross-validate: variables defined in `geo` / `split_clients` appear in variable picker when editing downstream directives | Pending |
+
+---
+
+## 50. HTTP/3 & QUIC Support (F8.2)
+
+**Gap Ref:** (new) · **Scope:** Frontend
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 50.1 | `listen` editor gains `quic` + `reuseport` flags (alongside existing `ssl`, `http2`) | Pending |
+| 50.2 | `http3 on/off`, `http3_hq` toggles on server card | Pending |
+| 50.3 | `ssl_early_data` toggle in SSL section | Pending |
+| 50.4 | Auto-emit `add_header Alt-Svc 'h3=":443"; ma=86400'` when HTTP/3 enabled | Pending |
+| 50.5 | `quic_retry`, `ssl_reject_handshake` advanced options | Pending |
+
+---
+
+## 51. Advanced Compression (F8.3)
+
+**Gap Ref:** (new) · **Scope:** Frontend · **Dependencies:** 15.7 (gzip panel)
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 51.1 | Brotli section (ngx_brotli): `brotli on`, `brotli_comp_level`, `brotli_types`, `brotli_static` | Pending |
+| 51.2 | `gzip_static` + `gunzip` toggles | Pending |
+| 51.3 | Compression preset: "Web-optimized" enables gzip + brotli with web MIME types | Pending |
+
+---
+
+## 52. Observability & Status (F8.4)
+
+**Gap Ref:** (new) · **Scope:** Both
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 52.1 | `stub_status` location builder (path + `allow` / `deny` ACL + `access_log off`) | Pending |
+| 52.2 | `status_zone` fields on server/upstream (Nginx Plus badge) | Pending |
+| 52.3 | Preset: JSON `access_log` (log_format with `escape=json` + structured fields) | Pending |
+| 52.4 | `error_log` per-server severity dropdown already covered in 16.2 — verify it exposes `debug_connection` option | Pending |
+
+---
+
+## Phase 9 — Ingress / Egress Management
+
+**Driver:** Nginx doesn't model "ingress/egress" natively, but operators think that way. These views aggregate across files to answer "what's exposed?" and "what backends does this nginx talk to?".
+
+## 53. Ingress / Egress Dashboards (F9.1)
+
+**Gap Ref:** (new) · **Scope:** Both
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 53.1 | **Published Endpoints** view: aggregated table of every externally-reachable `server_name:port/path` across all config files with SSL/HTTP-version/backend columns | Pending |
+| 53.2 | **Outbound Dependencies** view: every `proxy_pass` / `fastcgi_pass` / `grpc_pass` / `uwsgi_pass` target, grouped by upstream name vs. direct host, with DNS vs. IP indicator | Pending |
+| 53.3 | Warning badge on `proxy_pass` to a hostname when no `resolver` directive exists in scope | Pending |
+| 53.4 | Export Published Endpoints and Outbound Dependencies as CSV / JSON for audits | Pending |
+| 53.5 | Backend API: `GET /api/topology/endpoints` and `GET /api/topology/outbound` (aggregations across all parsed configs) | Pending |
+
+---
+
+## 54. Ingress Advanced — Access & Traffic Controls (F9.2)
+
+**Gap Ref:** (new) — complements F2.1 rate limiting and F2.8 allow/deny · **Scope:** Frontend
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 54.1 | `satisfy any|all` toggle on server/location when mixing `auth_basic` + `allow`/`deny` | Pending |
+| 54.2 | Per-location / per-server `limit_req` apply UI: zone dropdown (defined at HTTP level) + `burst` + `nodelay` | Pending |
+| 54.3 | Per-location / per-server `limit_conn` apply UI | Pending |
+| 54.4 | Active `health_check` + `match { }` fields inside upstream cards (clearly badged Nginx Plus only) | Pending |
+
+---
+
+## 55. Egress Tuning (F9.3)
+
+**Gap Ref:** (new) · **Scope:** Frontend
+
+| ID | Task | Status |
+| :--- | :--- | :---: |
+| 55.1 | `proxy_next_upstream` condition checkboxes (error, timeout, invalid_header, http_500/502/503/504, http_403/404, non_idempotent, off) | Pending |
+| 55.2 | `proxy_next_upstream_tries` + `proxy_next_upstream_timeout` inputs | Pending |
+| 55.3 | Per-upstream-server `resolve` parameter (DNS-based dynamic upstreams — Nginx Plus badge) | Pending |
+| 55.4 | `resolver` + `resolver_timeout` at server/http level (F2.10 added per-server; surface at http too for egress DNS) | Pending |
+
+---
+
 ## Summary
 
 | Category | Total | Pending | In Progress | Done | Blocked |
@@ -620,4 +828,28 @@
 | 40. Optional Features (F5.x) | 5 | 0 | 0 | 5 | 0 |
 | **Subtotal (New)** | **131** | **0** | **0** | **131** | **0** |
 | | | | | | |
-| **Grand Total** | **213** | **0** | **0** | **213** | **0** |
+| **Phase 6 — UX & Top-Nav Polish** | | | | | |
+| 41. Top-Nav, Theming, Remote File Sources (F6.1) | 6 | 0 | 0 | 6 | 0 |
+| | | | | | |
+| **Phase 7 — Application Backend Activation** | | | | | |
+| 42. PHP / FastCGI Support (F7.1) | 6 | 6 | 0 | 0 | 0 |
+| 43. Python uWSGI Support (F7.2) | 2 | 2 | 0 | 0 | 0 |
+| 44. gRPC Support (F7.3) | 3 | 3 | 0 | 0 | 0 |
+| 45. Static Site / SPA Support (F7.4) | 7 | 7 | 0 | 0 | 0 |
+| 46. Node.js / ASGI Wizard Templates (F7.5) | 3 | 3 | 0 | 0 | 0 |
+| 47. `return` / Redirect Helper at Location (F7.6) | 3 | 3 | 0 | 0 | 0 |
+| 48. CORS Preset (F7.7) | 3 | 3 | 0 | 0 | 0 |
+| | | | | | |
+| **Phase 8 — Security, Routing, Modern Protocols** | | | | | |
+| 49. `geo` & `split_clients` Block Editors (F8.1) | 3 | 3 | 0 | 0 | 0 |
+| 50. HTTP/3 & QUIC Support (F8.2) | 5 | 5 | 0 | 0 | 0 |
+| 51. Advanced Compression (F8.3) | 3 | 3 | 0 | 0 | 0 |
+| 52. Observability & Status (F8.4) | 4 | 4 | 0 | 0 | 0 |
+| | | | | | |
+| **Phase 9 — Ingress / Egress Management** | | | | | |
+| 53. Ingress / Egress Dashboards (F9.1) | 5 | 5 | 0 | 0 | 0 |
+| 54. Ingress Advanced — Access & Traffic (F9.2) | 4 | 4 | 0 | 0 | 0 |
+| 55. Egress Tuning (F9.3) | 4 | 4 | 0 | 0 | 0 |
+| **Subtotal (Phases 6–9 — 2026-04-18 audit)** | **61** | **55** | **0** | **6** | **0** |
+| | | | | | |
+| **Grand Total** | **274** | **55** | **0** | **219** | **0** |

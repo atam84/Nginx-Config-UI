@@ -383,7 +383,7 @@
 }
 
 .hs-btn-remove:hover {
-  color: #ef4444;
+  color: var(--error);
 }
 
 .hs-list {
@@ -456,7 +456,7 @@
 }
 
 .hs-tag-remove:hover {
-  color: #ef4444;
+  color: var(--error);
 }
 
 /* ── Include list ─────────────────────────────────────────────────────────── */

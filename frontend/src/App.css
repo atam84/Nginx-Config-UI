@@ -38,8 +38,23 @@
 }
 
 .app-nav-links button.active {
-  background: rgba(88, 166, 255, 0.15);
+  background: var(--accent-soft);
   color: var(--accent);
+}
+
+.app-nav-links button.theme-toggle {
+  width: 2rem;
+  padding: 0.4rem 0;
+  text-align: center;
+  font-size: 1rem;
+  line-height: 1;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.app-nav-links button.theme-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 .app-readonly-toggle {
@@ -49,8 +64,9 @@
   font-size: 0.8rem;
   color: var(--text-muted);
   cursor: pointer;
-  margin-left: auto;
-  padding-left: 1rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--border);
+  margin-left: 0.25rem;
 }
 
 .app-readonly-toggle:hover {
