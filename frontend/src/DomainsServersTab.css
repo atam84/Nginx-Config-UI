@@ -2,6 +2,9 @@
   border: none;
   padding: 0;
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
 .servers-empty {
@@ -20,6 +23,20 @@
   border-radius: 8px;
   padding: 1.25rem;
   background: var(--bg);
+}
+
+/* Baseline input/select look inside any server card. Specific row rules below
+   refine size/width/flex but inherit font/padding/border/background from here. */
+.server-card input[type='text'],
+.server-card input[type='number'],
+.server-card select {
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
 }
 
 .server-card.block-disabled {
@@ -154,6 +171,32 @@
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
+}
+
+.ssl-section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.ssl-section-head .ssl-section-toggle,
+.ssl-section-head .ssl-section-label {
+  margin-bottom: 0;
+}
+
+.btn-proxy-defaults {
+  font-weight: 600;
+  color: #f97316;
+  border-color: #f97316;
+  margin-left: auto;
+}
+
+.btn-proxy-defaults:hover {
+  background: color-mix(in srgb, var(--bg) 80%, #f97316 20%);
+  color: #f97316;
+  border-color: #f97316;
 }
 
 .ssl-section-toggle {
@@ -399,6 +442,13 @@
 .location-path-input {
   flex: 1;
   min-width: 120px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
 }
 
 .location-enabled {
@@ -461,12 +511,21 @@
   align-items: center;
 }
 
-.header-row input {
+.header-row input[type='text'],
+.header-row input[type='number'] {
   flex: 1;
   min-width: 0;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
 }
 
-.header-row input:first-child {
+.header-row input[type='text']:first-child,
+.header-row input[type='number']:first-child {
   max-width: 180px;
 }
 
@@ -592,11 +651,25 @@
 .rewrite-row input,
 .return-row input {
   flex: 1;
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
 }
 
 .return-row select {
   width: 80px;
   flex-shrink: 0;
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
 }
 
 /* F2.1 — rate limiting row */
@@ -662,8 +735,16 @@
   flex-shrink: 0;
 }
 
-.access-rule-row input[type='text'] {
+.access-rule-row input[type='text'],
+.access-rule-row input[type='number'] {
   flex: 1;
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
 }
 
 .access-rule-presets {
@@ -727,6 +808,11 @@
   flex: 1;
   font-family: monospace;
   font-size: 0.85rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
 }
 
 .if-block-body {
@@ -743,10 +829,16 @@
   align-items: center;
 }
 
-.if-directive-row input[type='text'] {
+.if-directive-row input[type='text'],
+.if-directive-row input[type='number'] {
   flex: 1;
   font-family: monospace;
   font-size: 0.85rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
 }
 
 /* F2.5 — nested locations */
@@ -788,9 +880,24 @@
 .nested-location-row select {
   width: 130px;
   flex-shrink: 0;
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
 }
 
-.nested-location-row input[type='text'] {
+.nested-location-row input[type='text'],
+.nested-location-row input[type='number'] {
   flex: 1;
   min-width: 80px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
 }

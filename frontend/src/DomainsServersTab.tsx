@@ -18,6 +18,8 @@ import {
   getBlockPosition,
 } from './configUtils'
 import BlockContextMenu, { type BlockAction } from './BlockContextMenu'
+import InfoIcon from './InfoIcon'
+import IfConditionBuilder from './IfConditionBuilder'
 import './DomainsServersTab.css'
 
 interface Props {
@@ -182,6 +184,19 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
   const [expandedAuth, setExpandedAuth] = useState<Record<string, boolean>>({})
   const [expandedErrorPages, setExpandedErrorPages] = useState<Record<string, boolean>>({})
   const [resolverIPInputs, setResolverIPInputs] = useState<Record<string, string>>({})
+  // Draft row counts for row-based editors, keyed by `${blockId}:${editor}`.
+  // Lets the UI show empty editable rows that aren't yet committed to the config
+  // (which strips empty directives as invalid nginx).
+  const [drafts, setDrafts] = useState<Record<string, number>>({})
+  const draftKey = (blockId: string | undefined, editor: string) => `${blockId ?? ''}:${editor}`
+  const getDrafts = (blockId: string | undefined, editor: string) => drafts[draftKey(blockId, editor)] ?? 0
+  const addDraft = (blockId: string | undefined, editor: string) =>
+    setDrafts((p) => ({ ...p, [draftKey(blockId, editor)]: (p[draftKey(blockId, editor)] ?? 0) + 1 }))
+  const removeDraft = (blockId: string | undefined, editor: string, delta = 1) =>
+    setDrafts((p) => ({ ...p, [draftKey(blockId, editor)]: Math.max(0, (p[draftKey(blockId, editor)] ?? 0) - delta) }))
+  const syncDrafts = (blockId: string | undefined, editor: string, beforeCommitted: number, afterCommitted: number) => {
+    if (afterCommitted > beforeCommitted) removeDraft(blockId, editor, afterCommitted - beforeCommitted)
+  }
   // F4.1 — Let's Encrypt state
   const [certificates, setCertificates] = useState<CertInfo[]>([])
   const [certRequestId, setCertRequestId] = useState<string | null>(null)
@@ -431,15 +446,25 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
         const proxyHttpVersion  = getDirectiveArg(server, 'proxy_http_version', 0)
         const proxyReqBuf       = getDirectiveArg(server, 'proxy_request_buffering', 0)
         const ignoreInvalidHdrs = getDirectiveArg(server, 'ignore_invalid_headers', 0)
-        const srvProxyHeaders   = (server.directives ?? [])
+        const srvProxyHeadersCommitted = (server.directives ?? [])
           .filter((d) => d.name === 'proxy_set_header')
           .map((d) => ({ key: d.args?.[0] ?? '', value: d.args?.[1] ?? '' }))
+        const srvProxyHeaderDraftCount = getDrafts(server.id, 'srvProxyHeader')
+        const srvProxyHeaders = [
+          ...srvProxyHeadersCommitted,
+          ...Array.from({ length: srvProxyHeaderDraftCount }, () => ({ key: '', value: '' })),
+        ]
         const proxyDefaultsOpen = expandedProxyDefaults[server.id ?? ''] ?? false
 
         // F1.5 / F1.6 — server-level add_header
-        const srvAddHeaders = (server.directives ?? [])
+        const srvAddHeadersCommitted = (server.directives ?? [])
           .filter((d) => d.name === 'add_header')
           .map((d) => ({ key: d.args?.[0] ?? '', value: d.args?.[1] ?? '', always: (d.args ?? []).includes('always') }))
+        const srvAddHeaderDraftCount = getDrafts(server.id, 'srvAddHeader')
+        const srvAddHeaders = [
+          ...srvAddHeadersCommitted,
+          ...Array.from({ length: srvAddHeaderDraftCount }, () => ({ key: '', value: '', always: false })),
+        ]
         const addHeadersOpen = expandedAddHeaders[server.id ?? ''] ?? false
 
         // F2.9 — SSL enhancements
@@ -459,9 +484,14 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
         const resolverTimeout  = getDirectiveArg(server, 'resolver_timeout', 0)
 
         // F2.8 — access control (allow/deny)
-        const srvAccessRules = (server.directives ?? [])
+        const srvAccessRulesCommitted = (server.directives ?? [])
           .filter((d) => d.name === 'allow' || d.name === 'deny')
           .map((d) => ({ action: d.name as 'allow' | 'deny', value: d.args?.[0] ?? '' }))
+        const srvAccessRuleDraftCount = getDrafts(server.id, 'srvAccessRule')
+        const srvAccessRules: Array<{ action: 'allow' | 'deny'; value: string }> = [
+          ...srvAccessRulesCommitted,
+          ...Array.from({ length: srvAccessRuleDraftCount }, () => ({ action: 'allow' as const, value: '' })),
+        ]
 
         // F2.6 — if blocks
         const srvIfBlocks = (server.directives ?? []).filter((d) => d.name === 'if' && d.type === 'block')
@@ -537,7 +567,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
 
             {/* 9.1 server_name — tag input */}
             <div className="server-field">
-              <label>server_name</label>
+              <label>
+                server_name
+                <InfoIcon text="The domain(s) this server block matches. Multiple names space-separated. Supports wildcards (*.example.com) and regex (~^api\\d+\\.example\\.com$). Use '_' or a nonexistent name as a catch-all. First non-wildcard match wins." />
+              </label>
               <div className="server-name-tags">
                 {serverNames.map((name, i) => (
                   <span key={i} className="tag">
@@ -581,7 +614,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
 
             {/* 9.2 listen — port + ssl + http2 */}
             <div className="server-field">
-              <label>listen</label>
+              <label>
+                listen
+                <InfoIcon text="IP:port (or just port) where this server accepts connections. Enable `ssl` for HTTPS (then fill in ssl_certificate below). `http2` upgrades HTTPS connections to HTTP/2. A server can have multiple listen directives (e.g. listen 80 and listen 443 ssl)." />
+              </label>
               <div className="listen-row">
                 <input
                   type="number"
@@ -618,7 +654,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
 
             {/* 9.3 root, index */}
             <div className="server-field">
-              <label>root</label>
+              <label>
+                root
+                <InfoIcon text="Filesystem directory served as the document root (only for static/non-proxy sites). The final file path is root + URI, e.g. root=/var/www/html + /foo.html → /var/www/html/foo.html. Leave empty for reverse-proxy-only servers." />
+              </label>
               <input
                 type="text"
                 value={root}
@@ -627,7 +666,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
               />
             </div>
             <div className="server-field">
-              <label>index</label>
+              <label>
+                index
+                <InfoIcon text="Default files nginx tries when the request URI maps to a directory. Space-separated list in order of preference (e.g. `index.html index.php`). Only relevant when serving static files — ignored on pure reverse-proxy servers." />
+              </label>
               <input
                 type="text"
                 value={index}
@@ -638,7 +680,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
 
             {/* F1.2 — access_log */}
             <div className="server-field">
-              <label>access_log</label>
+              <label>
+                access_log
+                <InfoIcon text="Path + optional format name for this server's access log. Set to `off` to disable logging entirely. The format name must match a log_format defined in HTTP Settings → Logging (or use the built-in 'combined')." />
+              </label>
               <div className="server-field-row">
                 <input
                   type="text"
@@ -664,7 +709,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
 
             {/* F1.2 — error_log */}
             <div className="server-field">
-              <label>error_log</label>
+              <label>
+                error_log
+                <InfoIcon text="Path + minimum severity for this server's error log. Levels from quiet→verbose: crit, error, warn, notice, info, debug. Use warn or error in production; info/debug are very verbose and can impact performance." />
+              </label>
               <div className="server-field-row">
                 <input
                   type="text"
@@ -695,7 +743,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
 
             {/* F1.2 — client_max_body_size */}
             <div className="server-field">
-              <label>client_max_body_size</label>
+              <label>
+                client_max_body_size
+                <InfoIcon text="Max request body size accepted from the client. Requests exceeding this get 413 (Payload Too Large). Set to `0` for no limit (useful for large file uploads). Must be ≥ the largest expected upload. Overrides the http-block default for this server only." />
+              </label>
               <input
                 type="text"
                 value={clientMaxBody}
@@ -715,7 +766,15 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
               >
                 Response Headers (add_header) {addHeadersOpen ? '▾' : '▸'}
               </button>
-              {addHeadersOpen && (
+              {addHeadersOpen && (() => {
+                const writeSrvAddHeaders = (rows: typeof srvAddHeaders) => {
+                  const items = rows.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) }))
+                  const dirs = setBlockDirectivesMulti(server.directives ?? [], 'add_header', items)
+                  const afterCommitted = items.filter((it) => it.args.some((a) => a.trim() !== '')).length
+                  syncDrafts(server.id, 'srvAddHeader', srvAddHeadersCommitted.length, afterCommitted)
+                  updateServer(server.id, (s) => ({ ...s, directives: dirs }))
+                }
+                return (
                 <div className="ssl-fields">
                   <div className="header-list">
                     {srvAddHeaders.map((h, hi) => (
@@ -727,8 +786,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           onChange={(e) => {
                             const next = [...srvAddHeaders]
                             next[hi] = { ...next[hi], key: e.target.value }
-                            const dirs = setBlockDirectivesMulti(server.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                            updateServer(server.id, (s) => ({ ...s, directives: dirs }))
+                            writeSrvAddHeaders(next)
                           }}
                         />
                         <input
@@ -738,8 +796,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           onChange={(e) => {
                             const next = [...srvAddHeaders]
                             next[hi] = { ...next[hi], value: e.target.value }
-                            const dirs = setBlockDirectivesMulti(server.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                            updateServer(server.id, (s) => ({ ...s, directives: dirs }))
+                            writeSrvAddHeaders(next)
                           }}
                         />
                         <label className="checkbox-label always-label">
@@ -749,8 +806,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                             onChange={(e) => {
                               const next = [...srvAddHeaders]
                               next[hi] = { ...next[hi], always: e.target.checked }
-                              const dirs = setBlockDirectivesMulti(server.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                              updateServer(server.id, (s) => ({ ...s, directives: dirs }))
+                              writeSrvAddHeaders(next)
                             }}
                           />
                           always
@@ -759,9 +815,11 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           type="button"
                           className="btn-remove-header"
                           onClick={() => {
-                            const next = srvAddHeaders.filter((_, i) => i !== hi)
-                            const dirs = setBlockDirectivesMulti(server.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                            updateServer(server.id, (s) => ({ ...s, directives: dirs }))
+                            if (hi >= srvAddHeadersCommitted.length) {
+                              removeDraft(server.id, 'srvAddHeader')
+                            } else {
+                              writeSrvAddHeaders(srvAddHeaders.filter((_, i) => i !== hi))
+                            }
                           }}
                         >
                           ×
@@ -772,11 +830,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                       <button
                         type="button"
                         className="btn-preset"
-                        onClick={() => {
-                          const next = [...srvAddHeaders, { key: '', value: '', always: false }]
-                          const dirs = setBlockDirectivesMulti(server.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                          updateServer(server.id, (s) => ({ ...s, directives: dirs }))
-                        }}
+                        onClick={() => addDraft(server.id, 'srvAddHeader')}
                       >
                         + Add header
                       </button>
@@ -785,11 +839,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           key={p.key}
                           type="button"
                           className="btn-preset"
-                          onClick={() => {
-                            const next = [...srvAddHeaders, { ...p }]
-                            const dirs = setBlockDirectivesMulti(server.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                            updateServer(server.id, (s) => ({ ...s, directives: dirs }))
-                          }}
+                          onClick={() => writeSrvAddHeaders([...srvAddHeaders, { ...p }])}
                         >
                           + {p.key}
                         </button>
@@ -801,9 +851,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                         onClick={() => {
                           const existingKeys = new Set(srvAddHeaders.map((h) => h.key.toLowerCase()))
                           const toAdd = SECURITY_HEADERS_BUNDLE.filter((h) => !existingKeys.has(h.key.toLowerCase()))
-                          const next = [...srvAddHeaders, ...toAdd]
-                          const dirs = setBlockDirectivesMulti(server.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                          updateServer(server.id, (s) => ({ ...s, directives: dirs }))
+                          writeSrvAddHeaders([...srvAddHeaders, ...toAdd])
                         }}
                       >
                         ⚡ Apply Security Headers
@@ -811,22 +859,29 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                     </div>
                   </div>
                 </div>
-              )}
+                )
+              })()}
             </div>
 
             {/* 9.4–9.7 SSL section */}
             <div className="server-ssl-section">
-              <button
-                type="button"
-                className="ssl-section-toggle"
-                onClick={() => toggleSslExpand(server.id ?? '')}
-              >
-                SSL / TLS {sslOpen ? '▾' : '▸'}
-              </button>
+              <div className="ssl-section-head">
+                <button
+                  type="button"
+                  className="ssl-section-toggle"
+                  onClick={() => toggleSslExpand(server.id ?? '')}
+                >
+                  SSL / TLS {sslOpen ? '▾' : '▸'}
+                </button>
+                <InfoIcon text="Per-server TLS settings. ssl_certificate/ssl_certificate_key point at the fullchain PEM and private key. Protocols TLSv1.2 + TLSv1.3 are the modern choice; legacy ones have known weaknesses. OCSP stapling (ssl_stapling on + ssl_trusted_certificate) reduces client handshake latency." />
+              </div>
               {sslOpen && (
                 <div className="ssl-fields">
                   <div className="server-field">
-                    <label>ssl_certificate</label>
+                    <label>
+                      ssl_certificate
+                      <InfoIcon text="Path to the PEM-encoded fullchain certificate (your cert + any intermediates). Usually /etc/letsencrypt/live/&lt;domain&gt;/fullchain.pem for Let's Encrypt. Must be readable by the nginx master process." />
+                    </label>
                     <input
                       type="text"
                       value={sslCert}
@@ -835,7 +890,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                     />
                   </div>
                   <div className="server-field">
-                    <label>ssl_certificate_key</label>
+                    <label>
+                      ssl_certificate_key
+                      <InfoIcon text="Path to the PEM-encoded private key matching the certificate above. Keep this file mode 0600 and readable by the nginx master only. Usually /etc/letsencrypt/live/&lt;domain&gt;/privkey.pem for Let's Encrypt." />
+                    </label>
                     <input
                       type="text"
                       value={sslKey}
@@ -846,7 +904,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                     />
                   </div>
                   <div className="server-field">
-                    <label>ssl_protocols</label>
+                    <label>
+                      ssl_protocols
+                      <InfoIcon text="Enabled TLS versions. Modern default: TLSv1.2 + TLSv1.3. TLSv1 and TLSv1.1 have known weaknesses and are deprecated — only enable if you need compatibility with very old clients. TLSv1.3 is faster and safer; keep it on." />
+                    </label>
                     <div className="checkbox-row">
                       <label className="checkbox-label">
                         <input
@@ -877,7 +938,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                     </div>
                   </div>
                   <div className="server-field">
-                    <label>ssl_ciphers</label>
+                    <label>
+                      ssl_ciphers
+                      <InfoIcon text="TLSv1.2 cipher suite list (colon-separated). Presets: Modern (TLS 1.2+ ECDHE/GCM/CHACHA20 only, strongest) · Intermediate (Mozilla's broad-compat recommendation) · Old (very legacy, avoid). TLSv1.3 ciphers are negotiated separately and aren't controlled here." />
+                    </label>
                     <select
                       value={cipherPreset}
                       onChange={(e) => {
@@ -950,7 +1014,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                     return (
                       <div className="letsencrypt-section">
                         <div className="letsencrypt-header">
-                          <label>Let&apos;s Encrypt</label>
+                          <label>
+                            Let&apos;s Encrypt
+                            <InfoIcon text="Request a free 90-day TLS certificate from Let's Encrypt via certbot. The backend runs `certbot --webroot` for the listed server_names, then auto-fills the ssl_certificate/ssl_certificate_key paths. Requires the domain's DNS to resolve to this server and port 80 reachable for the HTTP-01 challenge." />
+                          </label>
                           {matchedCert && (
                             <span
                               className={`cert-badge cert-badge-${matchedCert.status}`}
@@ -1048,12 +1115,18 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                     </div>
                     <div className="proxy-timeouts-row">
                       <div className="server-field">
-                        <label>ssl_trusted_certificate</label>
+                        <label>
+                          ssl_trusted_certificate
+                          <InfoIcon text="CA chain used to verify OCSP responses when ssl_stapling is on. For Let's Encrypt, this is usually the same fullchain.pem (or chain.pem). Required for ssl_stapling_verify to work." />
+                        </label>
                         <input type="text" value={sslTrustedCert} placeholder="/etc/ssl/certs/ca.pem"
                           onChange={(e) => setServerDirective(server, 'ssl_trusted_certificate', e.target.value ? [e.target.value] : [])} />
                       </div>
                       <div className="server-field">
-                        <label>ssl_dhparam</label>
+                        <label>
+                          ssl_dhparam
+                          <InfoIcon text="Path to a DH parameters file used for DHE cipher suites (TLSv1.2 only). Generate once with `openssl dhparam -out dhparam.pem 2048`. With modern cipher lists that only use ECDHE (no DHE), this is not required." />
+                        </label>
                         <input type="text" value={sslDhparam} placeholder="/etc/ssl/dhparam.pem"
                           onChange={(e) => setServerDirective(server, 'ssl_dhparam', e.target.value ? [e.target.value] : [])} />
                       </div>
@@ -1089,7 +1162,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
               {expandedResolver[server.id ?? ''] && (
                 <div className="ssl-fields">
                   <div className="server-field">
-                    <label>resolver IPs</label>
+                    <label>
+                      resolver IPs
+                      <InfoIcon text="DNS servers nginx uses to resolve upstream names at runtime (needed when proxy_pass/resolver variables contain a hostname, or for OCSP stapling). Example: 1.1.1.1 8.8.8.8. Without this, nginx only resolves names at config load time." />
+                    </label>
                     <div className="tags-container">
                       {resolverIPs.map((ip, i) => (
                         <span key={i} className="server-name-tag">
@@ -1136,7 +1212,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                         }} />
                     </div>
                     <div className="server-field">
-                      <label>resolver_timeout</label>
+                      <label>
+                        resolver_timeout
+                        <InfoIcon text="How long nginx waits for a DNS response before giving up. Default 30s. Lower (e.g. 5s) means faster failure when DNS is broken; higher is more tolerant." />
+                      </label>
                       <input type="text" value={resolverTimeout} placeholder="30s"
                         onChange={(e) => setServerDirective(server, 'resolver_timeout', e.target.value ? [e.target.value] : [])} />
                     </div>
@@ -1155,19 +1234,64 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
 
             {/* F1.3 — Server-level Proxy Defaults */}
             <div className="server-ssl-section">
-              <button
-                type="button"
-                className="ssl-section-toggle"
-                onClick={() => toggleProxyDefaultsExpand(server.id ?? '')}
-              >
-                Proxy Defaults {proxyDefaultsOpen ? '▾' : '▸'}
-              </button>
+              <div className="ssl-section-head">
+                <button
+                  type="button"
+                  className="ssl-section-toggle"
+                  onClick={() => toggleProxyDefaultsExpand(server.id ?? '')}
+                >
+                  Proxy Defaults {proxyDefaultsOpen ? '▾' : '▸'}
+                </button>
+                <InfoIcon text="Directives that apply to every location inside this server that does proxy_pass (unless the location overrides them). Good place to set timeouts, HTTP version, and identity headers (Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto) once instead of repeating them per location." />
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className="btn-preset btn-proxy-defaults"
+                    title="Sets reasonable timeouts, HTTP 1.1, Connection reuse, and the standard identity headers (Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto)."
+                    onClick={() => {
+                      const existingHeaderKeys = new Set(srvProxyHeaders.map((h) => h.key.toLowerCase()))
+                      const desiredHeaders = [
+                        { key: 'Host', value: '$host' },
+                        { key: 'X-Real-IP', value: '$remote_addr' },
+                        { key: 'X-Forwarded-For', value: '$proxy_add_x_forwarded_for' },
+                        { key: 'X-Forwarded-Proto', value: '$scheme' },
+                        { key: 'Connection', value: '' },
+                      ]
+                      const merged = [
+                        ...srvProxyHeaders,
+                        ...desiredHeaders.filter((h) => !existingHeaderKeys.has(h.key.toLowerCase())),
+                      ]
+                      let dirs = server.directives ?? []
+                      dirs = setBlockDirectivesMulti(dirs, 'proxy_set_header', merged.map((x) => ({ args: x.value === '' ? [x.key, '""'] : [x.key, x.value] })))
+                      if (!getDirectiveArg({ ...server, directives: dirs } as Node, 'proxy_connect_timeout', 0)) {
+                        dirs = setBlockDirective(dirs, 'proxy_connect_timeout', ['60s'])
+                      }
+                      if (!getDirectiveArg({ ...server, directives: dirs } as Node, 'proxy_read_timeout', 0)) {
+                        dirs = setBlockDirective(dirs, 'proxy_read_timeout', ['60s'])
+                      }
+                      if (!getDirectiveArg({ ...server, directives: dirs } as Node, 'proxy_send_timeout', 0)) {
+                        dirs = setBlockDirective(dirs, 'proxy_send_timeout', ['60s'])
+                      }
+                      if (!getDirectiveArg({ ...server, directives: dirs } as Node, 'proxy_http_version', 0)) {
+                        dirs = setBlockDirective(dirs, 'proxy_http_version', ['1.1'])
+                      }
+                      updateServer(server.id, (s) => ({ ...s, directives: dirs }))
+                      setExpandedProxyDefaults((prev) => ({ ...prev, [server.id ?? '']: true }))
+                    }}
+                  >
+                    ⚡ Apply proxy defaults
+                  </button>
+                )}
+              </div>
               {proxyDefaultsOpen && (
                 <div className="ssl-fields">
                   {/* Timeouts row */}
                   <div className="proxy-timeouts-row">
                     <div className="server-field">
-                      <label>proxy_connect_timeout</label>
+                      <label>
+                        proxy_connect_timeout
+                        <InfoIcon text="How long nginx waits to establish a TCP connection to the backend. Default 60s. Drop to 5s for fast-fail against healthy local backends; raise for distant or slow-to-accept services. Cannot exceed 75s in most OSes." />
+                      </label>
                       <input
                         type="text"
                         value={proxyConnTimeout}
@@ -1178,7 +1302,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                       />
                     </div>
                     <div className="server-field">
-                      <label>proxy_read_timeout</label>
+                      <label>
+                        proxy_read_timeout
+                        <InfoIcon text="Max time between two successive reads from the backend (not total request duration). Default 60s. If the backend streams slowly or takes time between chunks, raise this. Exceeding kills the connection with 504 Gateway Timeout." />
+                      </label>
                       <input
                         type="text"
                         value={proxyReadTimeout}
@@ -1189,7 +1316,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                       />
                     </div>
                     <div className="server-field">
-                      <label>proxy_send_timeout</label>
+                      <label>
+                        proxy_send_timeout
+                        <InfoIcon text="Max time between two successive writes to the backend (not total request duration). Default 60s. Relevant for large uploads or slow backends accepting data slowly." />
+                      </label>
                       <input
                         type="text"
                         value={proxySendTimeout}
@@ -1203,7 +1333,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
 
                   {/* proxy_http_version */}
                   <div className="server-field">
-                    <label>proxy_http_version</label>
+                    <label>
+                      proxy_http_version
+                      <InfoIcon text="HTTP version used toward the backend. Default 1.0. Set 1.1 to enable keepalive/connection reuse (pair with `proxy_set_header Connection &quot;&quot;` and upstream `keepalive N`). Required for WebSocket upgrades." />
+                    </label>
                     <select
                       value={proxyHttpVersion}
                       onChange={(e) =>
@@ -1243,8 +1376,20 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                   </div>
 
                   {/* Server-level proxy_set_header */}
+                  {(() => {
+                    const writeSrvProxyHeaders = (rows: typeof srvProxyHeaders) => {
+                      const items = rows.map((x) => ({ args: [x.key, x.value] }))
+                      const dirs = setBlockDirectivesMulti(server.directives ?? [], 'proxy_set_header', items)
+                      const afterCommitted = items.filter((it) => it.args.some((a) => a.trim() !== '')).length
+                      syncDrafts(server.id, 'srvProxyHeader', srvProxyHeadersCommitted.length, afterCommitted)
+                      updateServer(server.id, (s) => ({ ...s, directives: dirs }))
+                    }
+                    return (
                   <div className="server-field">
-                    <label>proxy_set_header (server-level)</label>
+                    <label>
+                      proxy_set_header (server-level)
+                      <InfoIcon text="Headers to send to the backend, applying to every location in this server unless the location sets its own proxy_set_header (which replaces the server-level list entirely — nginx does not merge). Common values: Host $host · X-Real-IP $remote_addr · X-Forwarded-For $proxy_add_x_forwarded_for · X-Forwarded-Proto $scheme." />
+                    </label>
                     <div className="header-list">
                       {srvProxyHeaders.map((h, hi) => (
                         <div key={hi} className="header-row">
@@ -1255,12 +1400,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                             onChange={(e) => {
                               const next = [...srvProxyHeaders]
                               next[hi] = { ...next[hi], key: e.target.value }
-                              const dirs = setBlockDirectivesMulti(
-                                server.directives ?? [],
-                                'proxy_set_header',
-                                next.map((x) => ({ args: [x.key, x.value] }))
-                              )
-                              updateServer(server.id, (s) => ({ ...s, directives: dirs }))
+                              writeSrvProxyHeaders(next)
                             }}
                           />
                           <input
@@ -1270,25 +1410,18 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                             onChange={(e) => {
                               const next = [...srvProxyHeaders]
                               next[hi] = { ...next[hi], value: e.target.value }
-                              const dirs = setBlockDirectivesMulti(
-                                server.directives ?? [],
-                                'proxy_set_header',
-                                next.map((x) => ({ args: [x.key, x.value] }))
-                              )
-                              updateServer(server.id, (s) => ({ ...s, directives: dirs }))
+                              writeSrvProxyHeaders(next)
                             }}
                           />
                           <button
                             type="button"
                             className="btn-remove-header"
                             onClick={() => {
-                              const next = srvProxyHeaders.filter((_, i) => i !== hi)
-                              const dirs = setBlockDirectivesMulti(
-                                server.directives ?? [],
-                                'proxy_set_header',
-                                next.map((x) => ({ args: [x.key, x.value] }))
-                              )
-                              updateServer(server.id, (s) => ({ ...s, directives: dirs }))
+                              if (hi >= srvProxyHeadersCommitted.length) {
+                                removeDraft(server.id, 'srvProxyHeader')
+                              } else {
+                                writeSrvProxyHeaders(srvProxyHeaders.filter((_, i) => i !== hi))
+                              }
                             }}
                           >
                             ×
@@ -1299,15 +1432,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                         <button
                           type="button"
                           className="btn-preset"
-                          onClick={() => {
-                            const next = [...srvProxyHeaders, { key: '', value: '' }]
-                            const dirs = setBlockDirectivesMulti(
-                              server.directives ?? [],
-                              'proxy_set_header',
-                              next.map((x) => ({ args: [x.key, x.value] }))
-                            )
-                            updateServer(server.id, (s) => ({ ...s, directives: dirs }))
-                          }}
+                          onClick={() => addDraft(server.id, 'srvProxyHeader')}
                         >
                           + Add header
                         </button>
@@ -1316,15 +1441,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                             key={p.key}
                             type="button"
                             className="btn-preset"
-                            onClick={() => {
-                              const next = [...srvProxyHeaders, { key: p.key, value: p.value }]
-                              const dirs = setBlockDirectivesMulti(
-                                server.directives ?? [],
-                                'proxy_set_header',
-                                next.map((x) => ({ args: [x.key, x.value] }))
-                              )
-                              updateServer(server.id, (s) => ({ ...s, directives: dirs }))
-                            }}
+                            onClick={() => writeSrvProxyHeaders([...srvProxyHeaders, { key: p.key, value: p.value }])}
                           >
                             + {p.key}
                           </button>
@@ -1332,16 +1449,24 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                       </div>
                     </div>
                   </div>
+                    )
+                  })()}
                 </div>
               )}
             </div>
 
             {/* F2.1 — Server-level Rate Limiting */}
             <div className="server-ssl-section">
-              <div className="ssl-section-label">Rate Limiting</div>
+              <div className="ssl-section-head">
+                <div className="ssl-section-label">Rate Limiting</div>
+                <InfoIcon text="Throttling at the server level. `limit_req` references a zone defined in HTTP Settings → Rate Limiting and enforces a request rate; `burst` allows short spikes before 503s, `nodelay` serves burst requests immediately. `limit_conn` caps concurrent connections per key." />
+              </div>
               <div className="ssl-fields">
                 <div className="server-field">
-                  <label>limit_req</label>
+                  <label>
+                    limit_req
+                    <InfoIcon text="Enforces a request rate using a zone declared in HTTP Settings → Rate Limiting. `burst=N` lets short spikes queue (up to N requests) before rejecting with 503; `nodelay` serves burst requests immediately instead of pacing them." />
+                  </label>
                   <div className="loc-rate-limit-row">
                     <select
                       value={srvLimitReqZone}
@@ -1392,7 +1517,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                   </div>
                 </div>
                 <div className="server-field">
-                  <label>limit_conn</label>
+                  <label>
+                    limit_conn
+                    <InfoIcon text="Caps concurrent connections per key using a zone declared in HTTP Settings → Rate Limiting. Excess connections get 503. Useful for preventing single clients from hogging many connections." />
+                  </label>
                   <div className="loc-rate-limit-row">
                     <select
                       value={srvLimitConnZone}
@@ -1429,7 +1557,13 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                 onClick={() => setExpandedAccessControl((p) => ({ ...p, [server.id ?? '']: !p[server.id ?? ''] }))}>
                 Access Control {expandedAccessControl[server.id ?? ''] ? '▾' : '▸'}
               </button>
-              {expandedAccessControl[server.id ?? ''] && (
+              {expandedAccessControl[server.id ?? ''] && (() => {
+                const writeSrvAccessRules = (rules: typeof srvAccessRules) => {
+                  setAccessRules(server, rules, true)
+                  const afterCommitted = rules.filter((r) => r.value.trim()).length
+                  syncDrafts(server.id, 'srvAccessRule', srvAccessRulesCommitted.length, afterCommitted)
+                }
+                return (
                 <div className="ssl-fields">
                   <div className="access-rules-list">
                     {srvAccessRules.map((rule, ri) => (
@@ -1437,7 +1571,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                         <select value={rule.action}
                           onChange={(e) => {
                             const next = srvAccessRules.map((r, j) => j === ri ? { ...r, action: e.target.value as 'allow' | 'deny' } : r)
-                            setAccessRules(server, next, true)
+                            writeSrvAccessRules(next)
                           }}>
                           <option value="allow">allow</option>
                           <option value="deny">deny</option>
@@ -1445,16 +1579,22 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                         <input type="text" value={rule.value} placeholder="IP, CIDR, or all"
                           onChange={(e) => {
                             const next = srvAccessRules.map((r, j) => j === ri ? { ...r, value: e.target.value } : r)
-                            setAccessRules(server, next, true)
+                            writeSrvAccessRules(next)
                           }} />
                         <button type="button" className="btn-remove-header"
-                          onClick={() => setAccessRules(server, srvAccessRules.filter((_, j) => j !== ri), true)}>×</button>
+                          onClick={() => {
+                            if (ri >= srvAccessRulesCommitted.length) {
+                              removeDraft(server.id, 'srvAccessRule')
+                            } else {
+                              writeSrvAccessRules(srvAccessRules.filter((_, j) => j !== ri))
+                            }
+                          }}>×</button>
                         {ri > 0 && (
                           <button type="button" className="btn-reorder" title="Move up"
                             onClick={() => {
                               const next = [...srvAccessRules]
                               ;[next[ri - 1], next[ri]] = [next[ri], next[ri - 1]]
-                              setAccessRules(server, next, true)
+                              writeSrvAccessRules(next)
                             }}>↑</button>
                         )}
                         {ri < srvAccessRules.length - 1 && (
@@ -1462,7 +1602,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                             onClick={() => {
                               const next = [...srvAccessRules]
                               ;[next[ri], next[ri + 1]] = [next[ri + 1], next[ri]]
-                              setAccessRules(server, next, true)
+                              writeSrvAccessRules(next)
                             }}>↓</button>
                         )}
                       </div>
@@ -1470,29 +1610,30 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                   </div>
                   <div className="access-rule-presets">
                     <button type="button" className="btn-preset"
-                      onClick={() => setAccessRules(server, [...srvAccessRules, { action: 'allow', value: '' }], true)}>
+                      onClick={() => addDraft(server.id, 'srvAccessRule')}>
                       + Add rule
                     </button>
                     <button type="button" className="btn-preset"
-                      onClick={() => setAccessRules(server, [...srvAccessRules, { action: 'allow', value: 'all' }], true)}>
+                      onClick={() => writeSrvAccessRules([...srvAccessRules, { action: 'allow', value: 'all' }])}>
                       + Allow all
                     </button>
                     <button type="button" className="btn-preset"
-                      onClick={() => setAccessRules(server, [...srvAccessRules, { action: 'deny', value: 'all' }], true)}>
+                      onClick={() => writeSrvAccessRules([...srvAccessRules, { action: 'deny', value: 'all' }])}>
                       + Deny all
                     </button>
                     <button type="button" className="btn-preset"
-                      onClick={() => setAccessRules(server, [
+                      onClick={() => writeSrvAccessRules([
                         ...srvAccessRules,
                         { action: 'allow', value: '10.0.0.0/8' },
                         { action: 'allow', value: '172.16.0.0/12' },
                         { action: 'allow', value: '192.168.0.0/16' },
-                      ], true)}>
+                      ])}>
                       + Allow private
                     </button>
                   </div>
                 </div>
-              )}
+                )
+              })()}
             </div>
 
             {/* F2.6 — if Block Support */}
@@ -1510,20 +1651,23 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                       <div key={ifBlock.id ?? ii} className="if-block-card">
                         <div className="if-block-header">
                           <span className="if-block-label">if</span>
-                          <input type="text" className="if-condition-input" value={condition} placeholder="($request_method = POST)"
-                            onChange={(e) => {
-                              const next = srvIfBlocks.map((b, j) =>
-                                j === ii ? { ...b, args: e.target.value ? [e.target.value] : [] } : b
-                              )
-                              const rest = (server.directives ?? []).filter((d) => !(d.name === 'if' && d.type === 'block'))
-                              updateServer(server.id, (s) => ({ ...s, directives: [...rest, ...next] }))
-                            }} />
                           <button type="button" className="btn-remove-header"
                             onClick={() => {
                               const rest = (server.directives ?? []).filter((d) => d.id !== ifBlock.id)
                               updateServer(server.id, (s) => ({ ...s, directives: rest }))
                             }}>×</button>
                         </div>
+                        <IfConditionBuilder
+                          value={condition}
+                          readOnly={readOnly}
+                          onChange={(v) => {
+                            const next = srvIfBlocks.map((b, j) =>
+                              j === ii ? { ...b, args: v ? [v] : [] } : b
+                            )
+                            const rest = (server.directives ?? []).filter((d) => !(d.name === 'if' && d.type === 'block'))
+                            updateServer(server.id, (s) => ({ ...s, directives: [...rest, ...next] }))
+                          }}
+                        />
                         <div className="if-block-body">
                           {innerDirs.map((d, di) => (
                             <div key={di} className="if-directive-row">
@@ -1704,9 +1848,14 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
               {locations.map((loc, li) => {
                 const { modifier, path } = parseLocationArgs(loc.args ?? [])
                 const proxyPassVal = getDirectiveArg(loc, 'proxy_pass', 0)
-                const proxyHeaders = (loc.directives ?? [])
+                const proxyHeadersCommitted = (loc.directives ?? [])
                   .filter((d) => d.name === 'proxy_set_header')
                   .map((d) => ({ key: d.args?.[0] ?? '', value: d.args?.[1] ?? '' }))
+                const locProxyHeaderDraftCount = getDrafts(loc.id, 'locProxyHeader')
+                const proxyHeaders = [
+                  ...proxyHeadersCommitted,
+                  ...Array.from({ length: locProxyHeaderDraftCount }, () => ({ key: '', value: '' })),
+                ]
                 const rewrite = getDirective(loc, 'rewrite')
                 const rewritePattern = rewrite?.args?.[0] ?? ''
                 const rewriteReplacement = rewrite?.args?.[1] ?? ''
@@ -1728,9 +1877,14 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                 const locAccessLog   = getDirectiveArg(loc, 'access_log', 0)
                 const logNotFound    = getDirectiveArg(loc, 'log_not_found', 0)
                 // F1.5 — location add_header
-                const locAddHeaders  = (loc.directives ?? [])
+                const locAddHeadersCommitted = (loc.directives ?? [])
                   .filter((d) => d.name === 'add_header')
                   .map((d) => ({ key: d.args?.[0] ?? '', value: d.args?.[1] ?? '', always: (d.args ?? []).includes('always') }))
+                const locAddHeaderDraftCount = getDrafts(loc.id, 'locAddHeader')
+                const locAddHeaders = [
+                  ...locAddHeadersCommitted,
+                  ...Array.from({ length: locAddHeaderDraftCount }, () => ({ key: '', value: '', always: false })),
+                ]
                 // F2.1 — rate limiting
                 const locLimitReqDir = (loc.directives ?? []).find((d) => d.name === 'limit_req')
                 const locLimitReqZone = (() => {
@@ -1755,9 +1909,14 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                   .map((d) => ({ codes: (d.args ?? []).slice(0, -1).join(' '), duration: (d.args ?? []).slice(-1)[0] ?? '' }))
                 const locProxyCacheUseStale = getDirectiveArgs(loc, 'proxy_cache_use_stale')
                 // F2.8 — location access control
-                const locAccessRules = (loc.directives ?? [])
+                const locAccessRulesCommitted = (loc.directives ?? [])
                   .filter((d) => d.name === 'allow' || d.name === 'deny')
                   .map((d) => ({ action: d.name as 'allow' | 'deny', value: d.args?.[0] ?? '' }))
+                const locAccessRuleDraftCount = getDrafts(loc.id, 'locAccessRule')
+                const locAccessRules: Array<{ action: 'allow' | 'deny'; value: string }> = [
+                  ...locAccessRulesCommitted,
+                  ...Array.from({ length: locAccessRuleDraftCount }, () => ({ action: 'allow' as const, value: '' })),
+                ]
                 // F2.6 — location if blocks
                 const locIfBlocks = (loc.directives ?? []).filter((d) => d.name === 'if' && d.type === 'block')
                 // F5.4 — auth
@@ -1845,7 +2004,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                     {locOpen && (
                       <div className="location-fields">
                         <div className="location-field">
-                          <label>proxy_pass</label>
+                          <label>
+                            proxy_pass
+                            <InfoIcon text="Target URL to forward matching requests to. Use `http://&lt;upstream-name&gt;` to round-robin through an upstream pool, or `http://host:port` for a single backend. Trailing slash matters: `proxy_pass http://backend/` rewrites the URI, without slash it keeps the original path." />
+                          </label>
                           <input
                             type="text"
                             list={`proxy-pass-${loc.id}`}
@@ -1863,8 +2025,20 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                             ))}
                           </datalist>
                         </div>
+                        {(() => {
+                          const writeLocProxyHeaders = (rows: typeof proxyHeaders) => {
+                            const items = rows.map((x) => ({ args: [x.key, x.value] }))
+                            const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'proxy_set_header', items)
+                            const afterCommitted = items.filter((it) => it.args.some((a) => a.trim() !== '')).length
+                            syncDrafts(loc.id, 'locProxyHeader', proxyHeadersCommitted.length, afterCommitted)
+                            updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                          }
+                          return (
                         <div className="location-field">
-                          <label>proxy_set_header</label>
+                          <label>
+                            proxy_set_header
+                            <InfoIcon text="Headers to send to the backend for requests matching this location. Setting any proxy_set_header at the location level REPLACES the full server-level list — nginx does not merge. If you override here, re-add the identity headers you need (Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto)." />
+                          </label>
                           <div className="header-list">
                             {proxyHeaders.map((h, hi) => (
                               <div key={hi} className="header-row">
@@ -1875,15 +2049,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                   onChange={(e) => {
                                     const next = [...proxyHeaders]
                                     next[hi] = { ...next[hi], key: e.target.value }
-                                    const dirs = setBlockDirectivesMulti(
-                                      loc.directives ?? [],
-                                      'proxy_set_header',
-                                      next.map((x) => ({ args: [x.key, x.value] }))
-                                    )
-                                    updateLocation(loc.id, (l) => ({
-                                      ...l,
-                                      directives: dirs,
-                                    }))
+                                    writeLocProxyHeaders(next)
                                   }}
                                 />
                                 <input
@@ -1893,31 +2059,18 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                   onChange={(e) => {
                                     const next = [...proxyHeaders]
                                     next[hi] = { ...next[hi], value: e.target.value }
-                                    const dirs = setBlockDirectivesMulti(
-                                      loc.directives ?? [],
-                                      'proxy_set_header',
-                                      next.map((x) => ({ args: [x.key, x.value] }))
-                                    )
-                                    updateLocation(loc.id, (l) => ({
-                                      ...l,
-                                      directives: dirs,
-                                    }))
+                                    writeLocProxyHeaders(next)
                                   }}
                                 />
                                 <button
                                   type="button"
                                   className="btn-remove-header"
                                   onClick={() => {
-                                    const next = proxyHeaders.filter((_, i) => i !== hi)
-                                    const dirs = setBlockDirectivesMulti(
-                                      loc.directives ?? [],
-                                      'proxy_set_header',
-                                      next.map((x) => ({ args: [x.key, x.value] }))
-                                    )
-                                    updateLocation(loc.id, (l) => ({
-                                      ...l,
-                                      directives: dirs,
-                                    }))
+                                    if (hi >= proxyHeadersCommitted.length) {
+                                      removeDraft(loc.id, 'locProxyHeader')
+                                    } else {
+                                      writeLocProxyHeaders(proxyHeaders.filter((_, i) => i !== hi))
+                                    }
                                   }}
                                 >
                                   ×
@@ -1928,15 +2081,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                               <button
                                 type="button"
                                 className="btn-preset"
-                                onClick={() => {
-                                  const next = [...proxyHeaders, { key: 'X-Custom-Header', value: '' }]
-                                  const dirs = setBlockDirectivesMulti(
-                                    loc.directives ?? [],
-                                    'proxy_set_header',
-                                    next.map((x) => ({ args: [x.key, x.value] }))
-                                  )
-                                  updateLocation(loc.id, (l) => Object.assign({}, l, { directives: dirs }))
-                                }}
+                                onClick={() => addDraft(loc.id, 'locProxyHeader')}
                               >
                                 + Add header
                               </button>
@@ -1945,15 +2090,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                   key={p.key}
                                   type="button"
                                   className="btn-preset"
-                                  onClick={() => {
-                                    const next = [...proxyHeaders, { key: p.key, value: p.value }]
-                                    const dirs = setBlockDirectivesMulti(
-                                      loc.directives ?? [],
-                                      'proxy_set_header',
-                                      next.map((x) => ({ args: [x.key, x.value] }))
-                                    )
-                                    updateLocation(loc.id, (l) => Object.assign({}, l, { directives: dirs }))
-                                  }}
+                                  onClick={() => writeLocProxyHeaders([...proxyHeaders, { key: p.key, value: p.value }])}
                                 >
                                   {'+ '}{p.key}
                                 </button>
@@ -1964,13 +2101,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                 onClick={() => {
                                   const existing = new Set(proxyHeaders.map((h) => h.key.toLowerCase()))
                                   const toAdd = WEBSOCKET_HEADERS.filter((h) => !existing.has(h.key.toLowerCase()))
-                                  const next = [...proxyHeaders, ...toAdd]
-                                  const dirs = setBlockDirectivesMulti(
-                                    loc.directives ?? [],
-                                    'proxy_set_header',
-                                    next.map((x) => ({ args: [x.key, x.value] }))
-                                  )
-                                  updateLocation(loc.id, (l) => Object.assign({}, l, { directives: dirs }))
+                                  writeLocProxyHeaders([...proxyHeaders, ...toAdd])
                                 }}
                               >
                                 + Websocket
@@ -1978,8 +2109,13 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                             </div>
                           </div>
                         </div>
+                          )
+                        })()}
                         <div className="location-field">
-                          <label>rewrite</label>
+                          <label>
+                            rewrite
+                            <InfoIcon text="Rewrites the URI using a regex → replacement. Flags: `last` (restart location matching with new URI), `break` (stop rewriting but keep processing in same location), `redirect` (302), `permanent` (301). Without a flag, processing continues through further rewrites." />
+                          </label>
                           <div className="rewrite-row">
                             <input
                               type="text"
@@ -2007,7 +2143,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           </div>
                         </div>
                         <div className="location-field">
-                          <label>return</label>
+                          <label>
+                            return
+                            <InfoIcon text="Ends processing and returns a response immediately. Common uses: `return 301 https://$host$request_uri` (HTTP→HTTPS redirect), `return 403` (block), `return 200 'OK'` (health check). Faster than rewrite because no regex matching." />
+                          </label>
                           <div className="return-row">
                             <select
                               value={returnCode}
@@ -2073,7 +2212,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                         {/* F1.4 — proxy timeouts */}
                         <div className="loc-timeouts-row">
                           <div className="location-field">
-                            <label>proxy_connect_timeout</label>
+                            <label>
+                        proxy_connect_timeout
+                        <InfoIcon text="How long nginx waits to establish a TCP connection to the backend. Default 60s. Drop to 5s for fast-fail against healthy local backends; raise for distant or slow-to-accept services. Cannot exceed 75s in most OSes." />
+                      </label>
                             <input
                               type="text"
                               value={locConnTimeout}
@@ -2082,7 +2224,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                             />
                           </div>
                           <div className="location-field">
-                            <label>proxy_read_timeout</label>
+                            <label>
+                        proxy_read_timeout
+                        <InfoIcon text="Max time between two successive reads from the backend (not total request duration). Default 60s. If the backend streams slowly or takes time between chunks, raise this. Exceeding kills the connection with 504 Gateway Timeout." />
+                      </label>
                             <input
                               type="text"
                               value={locReadTimeout}
@@ -2091,7 +2236,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                             />
                           </div>
                           <div className="location-field">
-                            <label>proxy_send_timeout</label>
+                            <label>
+                        proxy_send_timeout
+                        <InfoIcon text="Max time between two successive writes to the backend (not total request duration). Default 60s. Relevant for large uploads or slow backends accepting data slowly." />
+                      </label>
                             <input
                               type="text"
                               value={locSendTimeout}
@@ -2101,7 +2249,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           </div>
                         </div>
                         <div className="location-field">
-                          <label>proxy_http_version</label>
+                          <label>
+                      proxy_http_version
+                      <InfoIcon text="HTTP version used toward the backend. Default 1.0. Set 1.1 to enable keepalive/connection reuse (pair with `proxy_set_header Connection &quot;&quot;` and upstream `keepalive N`). Required for WebSocket upgrades." />
+                    </label>
                           <select
                             value={locHttpVersion}
                             onChange={(e) => setLocationDirective(loc, 'proxy_http_version', e.target.value ? [e.target.value] : [])}
@@ -2121,7 +2272,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           />
                         </div>
                         <div className="location-field">
-                          <label>expires</label>
+                          <label>
+                            expires
+                            <InfoIcon text="Sets the Expires and Cache-Control headers for responses from this location. Values: a duration (e.g. 30d, 1h), `max` (10 years), `off` (disable), or `epoch` (expired). Good for versioned static assets that never change." />
+                          </label>
                           <input
                             type="text"
                             value={expiresVal}
@@ -2130,7 +2284,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           />
                         </div>
                         <div className="location-field">
-                          <label>access_log</label>
+                          <label>
+                access_log
+                <InfoIcon text="Path + optional format name for this server's access log. Set to `off` to disable logging entirely. The format name must match a log_format defined in HTTP Settings → Logging (or use the built-in 'combined')." />
+              </label>
                           <input
                             type="text"
                             value={locAccessLog}
@@ -2150,8 +2307,20 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                         </div>
 
                         {/* F1.5 — add_header (response headers) */}
+                        {(() => {
+                          const writeLocAddHeaders = (rows: typeof locAddHeaders) => {
+                            const items = rows.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) }))
+                            const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'add_header', items)
+                            const afterCommitted = items.filter((it) => it.args.some((a) => a.trim() !== '')).length
+                            syncDrafts(loc.id, 'locAddHeader', locAddHeadersCommitted.length, afterCommitted)
+                            updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                          }
+                          return (
                         <div className="location-field">
-                          <label>add_header (response headers)</label>
+                          <label>
+                            add_header (response headers)
+                            <InfoIcon text="Adds headers to responses this server sends. `always` applies to error responses too (4xx/5xx) — without it, only successful responses get the header. Use 'Apply Security Headers' below for a curated bundle (HSTS, CSP, X-Frame-Options, etc.)." />
+                          </label>
                           <div className="header-list">
                             {locAddHeaders.map((h, hi) => (
                               <div key={hi} className="header-row">
@@ -2162,8 +2331,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                   onChange={(e) => {
                                     const next = [...locAddHeaders]
                                     next[hi] = { ...next[hi], key: e.target.value }
-                                    const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                                    updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                                    writeLocAddHeaders(next)
                                   }}
                                 />
                                 <input
@@ -2173,8 +2341,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                   onChange={(e) => {
                                     const next = [...locAddHeaders]
                                     next[hi] = { ...next[hi], value: e.target.value }
-                                    const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                                    updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                                    writeLocAddHeaders(next)
                                   }}
                                 />
                                 <label className="checkbox-label always-label">
@@ -2184,8 +2351,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                     onChange={(e) => {
                                       const next = [...locAddHeaders]
                                       next[hi] = { ...next[hi], always: e.target.checked }
-                                      const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                                      updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                                      writeLocAddHeaders(next)
                                     }}
                                   />
                                   always
@@ -2194,9 +2360,11 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                   type="button"
                                   className="btn-remove-header"
                                   onClick={() => {
-                                    const next = locAddHeaders.filter((_, i) => i !== hi)
-                                    const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                                    updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
+                                    if (hi >= locAddHeadersCommitted.length) {
+                                      removeDraft(loc.id, 'locAddHeader')
+                                    } else {
+                                      writeLocAddHeaders(locAddHeaders.filter((_, i) => i !== hi))
+                                    }
                                   }}
                                 >
                                   ×
@@ -2207,11 +2375,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                               <button
                                 type="button"
                                 className="btn-preset"
-                                onClick={() => {
-                                  const next = [...locAddHeaders, { key: '', value: '', always: false }]
-                                  const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                                  updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
-                                }}
+                                onClick={() => addDraft(loc.id, 'locAddHeader')}
                               >
                                 + Add header
                               </button>
@@ -2220,11 +2384,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                   key={p.key}
                                   type="button"
                                   className="btn-preset"
-                                  onClick={() => {
-                                    const next = [...locAddHeaders, { ...p }]
-                                    const dirs = setBlockDirectivesMulti(loc.directives ?? [], 'add_header', next.map((x) => ({ args: buildAddHeaderArgs(x.key, x.value, x.always) })))
-                                    updateLocation(loc.id, (l) => ({ ...l, directives: dirs }))
-                                  }}
+                                  onClick={() => writeLocAddHeaders([...locAddHeaders, { ...p }])}
                                 >
                                   + {p.key}
                                 </button>
@@ -2232,10 +2392,15 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                             </div>
                           </div>
                         </div>
+                          )
+                        })()}
 
                         {/* F2.1 — Rate Limiting */}
                         <div className="location-field">
-                          <label>limit_req</label>
+                          <label>
+                    limit_req
+                    <InfoIcon text="Enforces a request rate using a zone declared in HTTP Settings → Rate Limiting. `burst=N` lets short spikes queue (up to N requests) before rejecting with 503; `nodelay` serves burst requests immediately instead of pacing them." />
+                  </label>
                           <div className="loc-rate-limit-row">
                             <select
                               value={locLimitReqZone}
@@ -2286,7 +2451,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           </div>
                         </div>
                         <div className="location-field">
-                          <label>limit_conn</label>
+                          <label>
+                    limit_conn
+                    <InfoIcon text="Caps concurrent connections per key using a zone declared in HTTP Settings → Rate Limiting. Excess connections get 503. Useful for preventing single clients from hogging many connections." />
+                  </label>
                           <div className="loc-rate-limit-row">
                             <select
                               value={locLimitConnZone}
@@ -2317,7 +2485,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
 
                         {/* F2.2 — Proxy Cache */}
                         <div className="location-field">
-                          <label>proxy_cache</label>
+                          <label>
+                            proxy_cache
+                            <InfoIcon text="Name of a cache zone (declared in HTTP Settings → Cache Zones) that stores responses from this location. Set to `off` to disable caching here. Responses are keyed by proxy_cache_key (default: $scheme$proxy_host$request_uri)." />
+                          </label>
                           <select
                             value={locProxyCache}
                             onChange={(e) => setLocationDirective(loc, 'proxy_cache', e.target.value ? [e.target.value] : [])}
@@ -2330,7 +2501,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                         {locProxyCache && locProxyCache !== 'off' && (
                           <>
                             <div className="location-field">
-                              <label>proxy_cache_valid</label>
+                              <label>
+                                proxy_cache_valid
+                                <InfoIcon text="How long to cache each response status. Common: 200 10m (success) · 301 1h (permanent redirect) · 404 1m (not-found negative cache). Multiple entries can coexist. Without this, nginx only caches responses that carry explicit Cache-Control/Expires headers." />
+                              </label>
                               <div className="header-list">
                                 {locProxyCacheValidDirs.map((row, ri) => (
                                   <div key={ri} className="header-row">
@@ -2435,15 +2609,25 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                         )}
 
                         {/* F2.8 — Location Access Control */}
+                        {(() => {
+                          const writeLocAccessRules = (rules: typeof locAccessRules) => {
+                            setAccessRules(loc, rules, false)
+                            const afterCommitted = rules.filter((r) => r.value.trim()).length
+                            syncDrafts(loc.id, 'locAccessRule', locAccessRulesCommitted.length, afterCommitted)
+                          }
+                          return (
                         <div className="location-field">
-                          <label>Access Control (allow / deny)</label>
+                          <label>
+                            Access Control (allow / deny)
+                            <InfoIcon text="IP-based access rules evaluated in order — first match wins. Typically end with `deny all` to block anything not explicitly allowed. Rules take IPs, CIDR ranges, or `all`. Presets below insert common patterns (allow all, deny all, allow private networks)." />
+                          </label>
                           <div className="access-rules-list">
                             {locAccessRules.map((rule, ri) => (
                               <div key={ri} className="access-rule-row">
                                 <select value={rule.action}
                                   onChange={(e) => {
                                     const next = locAccessRules.map((r, j) => j === ri ? { ...r, action: e.target.value as 'allow' | 'deny' } : r)
-                                    setAccessRules(loc, next, false)
+                                    writeLocAccessRules(next)
                                   }}>
                                   <option value="allow">allow</option>
                                   <option value="deny">deny</option>
@@ -2451,16 +2635,22 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                 <input type="text" value={rule.value} placeholder="IP, CIDR, or all"
                                   onChange={(e) => {
                                     const next = locAccessRules.map((r, j) => j === ri ? { ...r, value: e.target.value } : r)
-                                    setAccessRules(loc, next, false)
+                                    writeLocAccessRules(next)
                                   }} />
                                 <button type="button" className="btn-remove-header"
-                                  onClick={() => setAccessRules(loc, locAccessRules.filter((_, j) => j !== ri), false)}>×</button>
+                                  onClick={() => {
+                                    if (ri >= locAccessRulesCommitted.length) {
+                                      removeDraft(loc.id, 'locAccessRule')
+                                    } else {
+                                      writeLocAccessRules(locAccessRules.filter((_, j) => j !== ri))
+                                    }
+                                  }}>×</button>
                                 {ri > 0 && (
                                   <button type="button" className="btn-reorder" title="Move up"
                                     onClick={() => {
                                       const next = [...locAccessRules]
                                       ;[next[ri - 1], next[ri]] = [next[ri], next[ri - 1]]
-                                      setAccessRules(loc, next, false)
+                                      writeLocAccessRules(next)
                                     }}>↑</button>
                                 )}
                                 {ri < locAccessRules.length - 1 && (
@@ -2468,7 +2658,7 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                                     onClick={() => {
                                       const next = [...locAccessRules]
                                       ;[next[ri], next[ri + 1]] = [next[ri + 1], next[ri]]
-                                      setAccessRules(loc, next, false)
+                                      writeLocAccessRules(next)
                                     }}>↓</button>
                                 )}
                               </div>
@@ -2476,19 +2666,24 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           </div>
                           <div className="access-rule-presets">
                             <button type="button" className="btn-preset"
-                              onClick={() => setAccessRules(loc, [...locAccessRules, { action: 'allow', value: '' }], false)}>
+                              onClick={() => addDraft(loc.id, 'locAccessRule')}>
                               + Add rule
                             </button>
                             <button type="button" className="btn-preset"
-                              onClick={() => setAccessRules(loc, [...locAccessRules, { action: 'deny', value: 'all' }], false)}>
+                              onClick={() => writeLocAccessRules([...locAccessRules, { action: 'deny', value: 'all' }])}>
                               + Deny all
                             </button>
                           </div>
                         </div>
+                          )
+                        })()}
 
                         {/* F2.6 — Location if Blocks */}
                         <div className="location-field">
-                          <label>If Conditions</label>
+                          <label>
+                            If Conditions
+                            <InfoIcon text="Conditional directive blocks. ⚠ 'if is evil' inside location — use with care: only `return`, `rewrite`, `set`, and `add_header` are reliably safe there. For conditional routing prefer named locations, `map`, or moving the check to the server-level if block." />
+                          </label>
                           <div className="if-blocks-warning">⚠ nginx "if is evil" — use carefully in location context</div>
                           {locIfBlocks.map((ifBlock, ii) => {
                             const condition = (ifBlock.args ?? []).join(' ')
@@ -2497,18 +2692,21 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                               <div key={ifBlock.id ?? ii} className="if-block-card">
                                 <div className="if-block-header">
                                   <span className="if-block-label">if</span>
-                                  <input type="text" className="if-condition-input" value={condition} placeholder="($request_method = POST)"
-                                    onChange={(e) => {
-                                      const next = locIfBlocks.map((b, j) => j === ii ? { ...b, args: e.target.value ? [e.target.value] : [] } : b)
-                                      const rest = (loc.directives ?? []).filter((d) => !(d.name === 'if' && d.type === 'block'))
-                                      updateLocation(loc.id, (l) => ({ ...l, directives: [...rest, ...next] }))
-                                    }} />
                                   <button type="button" className="btn-remove-header"
                                     onClick={() => {
                                       const rest = (loc.directives ?? []).filter((d) => d.id !== ifBlock.id)
                                       updateLocation(loc.id, (l) => ({ ...l, directives: rest }))
                                     }}>×</button>
                                 </div>
+                                <IfConditionBuilder
+                                  value={condition}
+                                  readOnly={readOnly}
+                                  onChange={(v) => {
+                                    const next = locIfBlocks.map((b, j) => j === ii ? { ...b, args: v ? [v] : [] } : b)
+                                    const rest = (loc.directives ?? []).filter((d) => !(d.name === 'if' && d.type === 'block'))
+                                    updateLocation(loc.id, (l) => ({ ...l, directives: [...rest, ...next] }))
+                                  }}
+                                />
                                 <div className="if-block-body">
                                   {innerDirs.map((d, di) => (
                                     <div key={di} className="if-directive-row">
@@ -2555,7 +2753,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
 
                         {/* F5.4 — Auth */}
                         <div className="location-field">
-                          <label>auth_basic</label>
+                          <label>
+                            auth_basic
+                            <InfoIcon text="HTTP Basic Auth realm string shown in the browser prompt. Set to `off` to disable. Requires auth_basic_user_file (htpasswd). Credentials are sent base64-encoded, so only use over HTTPS." />
+                          </label>
                           <input
                             type="text"
                             placeholder={'"Protected Area" or off'}
@@ -2565,7 +2766,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                         </div>
                         {locAuthBasic && locAuthBasic !== 'off' && (
                           <div className="location-field">
-                            <label>auth_basic_user_file</label>
+                            <label>
+                              auth_basic_user_file
+                              <InfoIcon text="Path to an htpasswd-format file (`htpasswd -c /path .htpasswd user`). Must be readable by the nginx workers. Supports crypt, apr1, SHA, and SSHA password hashes." />
+                            </label>
                             <input
                               type="text"
                               placeholder="/etc/nginx/.htpasswd"
@@ -2575,7 +2779,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
                           </div>
                         )}
                         <div className="location-field">
-                          <label>auth_request</label>
+                          <label>
+                            auth_request
+                            <InfoIcon text="Delegates authentication to an internal URI (e.g. /auth). nginx makes a subrequest; if it returns 2xx the request proceeds, 401/403 rejects. Use for SSO/OAuth gateways like oauth2-proxy. The subrequest URI must be internal and forward original request info via proxy_set_header." />
+                          </label>
                           <input
                             type="text"
                             placeholder="/auth"
@@ -2586,7 +2793,10 @@ export default function DomainsServersTab({ servers, upstreams = [], httpBlock, 
 
                         {/* F5.5 — Error Pages */}
                         <div className="location-field">
-                          <label>error_page</label>
+                          <label>
+                            error_page
+                            <InfoIcon text="Custom handler for HTTP error codes. Examples: `error_page 404 /404.html` (show a static page), `error_page 500 502 503 504 /50x.html` (shared error page), `error_page 404 =200 /empty.json` (rewrite status to 200). The target URI can be a file or a proxied path." />
+                          </label>
                           <div className="header-list">
                             {locErrorPages.map((row, ri) => (
                               <div key={ri} className="header-row">

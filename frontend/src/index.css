@@ -27,3 +27,19 @@ body {
 #root {
   min-height: 100vh;
 }
+
+/* Normalize number inputs so they share typography and width with text inputs.
+   Component-scoped rules (.x input[type='text'], .x input[type='number']) give
+   them the same padding/border/background; this removes the browser spin
+   buttons that would otherwise make number inputs visually wider. */
+input[type='number'] {
+  font: inherit;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

@@ -38,6 +38,20 @@ NGINX_CONFIG_ROOT=/etc/nginx NGINX_BIN=nginx NGINX_SERVICE=nginx ./nginx-config-
 NGINX_BACKUP_DIR=/backups ./nginx-config-ui
 ```
 
+### Authentication (single-user)
+
+Auth is configured via environment variables: `AUTH_USERNAME` and `AUTH_PASSWORD_HASH` (bcrypt). Set `AUTH_DISABLED=1` for dev.
+
+```bash
+# Show the configured user (reads env, then /etc/default/nginx-config-ui, /etc/sysconfig/nginx-config-ui)
+./scripts/list-user.sh
+
+# Reset the password — prompts for a new one and prints the bcrypt hash to paste
+./scripts/reset-password.sh [username]
+```
+
+`scripts/reset-password.sh` uses `cmd/hashpw` (a tiny Go helper that reuses `internal/auth`). After updating the env file or systemd unit, restart the service.
+
 ### API Documentation
 
 - **OpenAPI 3.0:** `/openapi.json`

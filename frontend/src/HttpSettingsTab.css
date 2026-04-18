@@ -18,6 +18,62 @@
   border-radius: 3px;
 }
 
+/* ── Presets section ──────────────────────────────────────────────────────── */
+
+.hs-presets {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  background: var(--bg-card);
+  margin-bottom: 0.25rem;
+}
+
+.hs-presets-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.65rem;
+}
+
+.hs-presets-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.hs-presets-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.hs-preset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.hs-preset-btn:hover {
+  border-color: #3b82f6;
+  background: color-mix(in srgb, var(--bg) 80%, #3b82f6 20%);
+}
+
+.hs-preset-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 /* ── Collapsible sections ─────────────────────────────────────────────────── */
 
 .hs-section {
@@ -26,13 +82,24 @@
   overflow: hidden;
 }
 
+.hs-section-header {
+  display: flex;
+  align-items: center;
+  background: var(--bg-card);
+  padding-right: 0.75rem;
+}
+
+.hs-section-header:hover {
+  background: color-mix(in srgb, var(--bg-card) 80%, var(--border) 20%);
+}
+
 .hs-section-btn {
-  width: 100%;
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 0.6rem;
   padding: 0.75rem 1rem;
-  background: var(--bg-card);
+  background: transparent;
   border: none;
   color: var(--text);
   font-size: 0.9rem;
@@ -40,10 +107,6 @@
   cursor: pointer;
   text-align: left;
   transition: background 0.15s;
-}
-
-.hs-section-btn:hover {
-  background: color-mix(in srgb, var(--bg-card) 80%, var(--border) 20%);
 }
 
 .hs-chevron {
@@ -279,7 +342,8 @@
   align-items: center;
 }
 
-.hs-add-row input[type='text'] {
+.hs-add-row input[type='text'],
+.hs-add-row input[type='number'] {
   font-family: inherit;
   font-size: 0.85rem;
   padding: 0.35rem 0.6rem;
@@ -409,7 +473,8 @@
   align-items: center;
 }
 
-.hs-include-row input[type='text'] {
+.hs-include-row input[type='text'],
+.hs-include-row input[type='number'] {
   flex: 1;
   font-family: monospace;
   font-size: 0.85rem;
@@ -438,7 +503,9 @@
 }
 
 .hs-zone-row input[type='text'],
-.hs-zone-add-row input[type='text'] {
+.hs-zone-row input[type='number'],
+.hs-zone-add-row input[type='text'],
+.hs-zone-add-row input[type='number'] {
   font-family: monospace;
   font-size: 0.85rem;
   padding: 0.4rem 0.6rem;
@@ -484,7 +551,9 @@
 }
 
 .hs-cache-row input[type='text'],
-.hs-cache-add input[type='text'] {
+.hs-cache-row input[type='number'],
+.hs-cache-add input[type='text'],
+.hs-cache-add input[type='number'] {
   font-family: monospace;
   font-size: 0.85rem;
   padding: 0.4rem 0.6rem;
@@ -523,7 +592,8 @@
   flex-wrap: wrap;
 }
 
-.hs-map-header .hs-field input[type='text'] {
+.hs-map-header .hs-field input[type='text'],
+.hs-map-header .hs-field input[type='number'] {
   width: 100%;
   box-sizing: border-box;
 }
@@ -540,7 +610,8 @@
   align-items: center;
 }
 
-.hs-map-entry-row input[type='text'] {
+.hs-map-entry-row input[type='text'],
+.hs-map-entry-row input[type='number'] {
   font-family: monospace;
   font-size: 0.85rem;
   padding: 0.4rem 0.6rem;
@@ -669,7 +740,8 @@
   align-items: center;
 }
 
-.hs-map-entry input[type='text'] {
+.hs-map-entry input[type='text'],
+.hs-map-entry input[type='number'] {
   flex: 1;
   font-family: monospace;
   font-size: 0.85rem;

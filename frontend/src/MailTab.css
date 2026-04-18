@@ -115,6 +115,7 @@
 }
 
 .mail-field input[type='text'],
+.mail-field input[type='number'],
 .mail-field select {
   font-family: inherit;
   font-size: 0.85rem;

@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { type ConfigFile, type Node } from './api'
+import InfoIcon from './InfoIcon'
 import './TopologyTab.css'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ const COLORS = {
 function findNodes(nodes: Node[], name: string): Node[] {
   const out: Node[] = []
   function walk(n: Node) {
-    if (n.name === name) out.push(n)
+    if (n.type === 'block' && n.name === name) out.push(n)
     for (const c of n.directives ?? []) walk(c)
   }
   for (const n of nodes) walk(n)
@@ -276,14 +277,18 @@ interface NodeCardProps {
   icon: string
   active: boolean
   onClick: () => void
+  onDoubleClick?: () => void
+  tooltip?: string
   small?: boolean
   children?: React.ReactNode
 }
 
-function NodeCard({ title, subtitle, badge, badgeColor, color, icon, active, onClick, small, children }: NodeCardProps) {
+function NodeCard({ title, subtitle, badge, badgeColor, color, icon, active, onClick, onDoubleClick, tooltip, small, children }: NodeCardProps) {
   return (
     <div
-      onClick={onClick}
+      onClick={(e) => { if (e.detail >= 2) return; onClick() }}
+      onDoubleClick={onDoubleClick}
+      title={tooltip}
       style={{
         background: active ? color.bg : COLORS.surface,
         border: `1.5px solid ${active ? color.accent : color.border + '60'}`,
@@ -367,14 +372,37 @@ export default function TopologyTab({ config, onNavigate }: Props) {
   const [selectedType, setSelectedType] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<'topology' | 'matrix' | 'stats'>('topology')
   const [filterText, setFilterText] = useState('')
+  const [yOffsets, setYOffsets] = useState<Record<string, number>>({})
+  const [colGap, setColGap] = useState(48)
+  const [rowGap, setRowGap] = useState(28)
   const nodeRefs = useRef<Record<string, Element | null>>({})
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const dragRef = useRef<{ id: string; startY: number; startOffset: number } | null>(null)
   const [, forceUpdate] = useState(0)
 
   useEffect(() => {
     const timer = setTimeout(() => forceUpdate((n) => n + 1), 100)
     return () => clearTimeout(timer)
-  }, [viewMode, selected])
+  }, [viewMode, selected, colGap, rowGap])
+
+  const onGripPointerDown = (id: string) => (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+    dragRef.current = { id, startY: e.clientY, startOffset: yOffsets[id] ?? 0 }
+  }
+  const onGripPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return
+    const { id, startY, startOffset } = dragRef.current
+    setYOffsets((prev) => ({ ...prev, [id]: startOffset + (e.clientY - startY) }))
+  }
+  const onGripPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return
+    try { (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId) } catch { /* noop */ }
+    dragRef.current = null
+  }
+  const resetLayout = () => { setYOffsets({}); setColGap(48); setRowGap(28) }
+  const layoutTouched = Object.keys(yOffsets).length > 0 || colGap !== 48 || rowGap !== 28
 
   const setRef = useCallback((id: string) => (el: Element | null) => {
     nodeRefs.current[id] = el
@@ -394,6 +422,13 @@ export default function TopologyTab({ config, onNavigate }: Props) {
       setSelectedType(type)
     }
   }
+
+  const cardHandlers = (type: string, id: string, navigateTo?: TabId) => ({
+    onClick: () => select(type, id),
+    onDoubleClick: navigateTo
+      ? () => { if (selected !== id || selectedType !== type) { setSelected(id); setSelectedType(type) } onNavigate(navigateTo, id) }
+      : undefined,
+  })
 
   const highlightPath = useMemo(() => {
     if (!selected) return new Set<string>()
@@ -478,6 +513,26 @@ export default function TopologyTab({ config, onNavigate }: Props) {
     ? topologyData.servers.filter((s) => s.name.toLowerCase().includes(filterText.toLowerCase()))
     : topologyData.servers
 
+  const DraggableCardWrapper = ({ id, children }: { id: string; children: React.ReactNode }) => (
+    <div
+      ref={(el) => { nodeRefs.current[id] = el }}
+      className="topology-draggable"
+      style={yOffsets[id] ? { transform: `translateY(${yOffsets[id]}px)` } : undefined}
+    >
+      <div
+        className="topology-grip"
+        title="Drag to move this card vertically"
+        onPointerDown={onGripPointerDown(id)}
+        onPointerMove={onGripPointerMove}
+        onPointerUp={onGripPointerUp}
+        onPointerCancel={onGripPointerUp}
+      >
+        <span>⋮⋮</span>
+      </div>
+      {children}
+    </div>
+  )
+
   if (!config) {
     return (
       <div className="topology-empty">
@@ -504,7 +559,7 @@ export default function TopologyTab({ config, onNavigate }: Props) {
       <div className="topology-header">
         <div>
           <h2 className="topology-title">Configuration Topology</h2>
-          <p className="topology-subtitle">Interactive traffic flow — click any node to trace connections</p>
+          <p className="topology-subtitle">Click a node to trace its full traffic path · Double-click to open it · Drag the ⋮⋮ handle to reposition a card</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input
@@ -520,6 +575,41 @@ export default function TopologyTab({ config, onNavigate }: Props) {
               className={`topology-view-btn${viewMode === m ? ' active' : ''}`}
             >{m}</button>
           ))}
+          {viewMode === 'topology' && (
+            <>
+              <label className="topology-spacing" title="Horizontal gap between columns (Listeners → Servers → Locations → Upstreams)">
+                <span>Cols</span>
+                <input
+                  type="range"
+                  min={16}
+                  max={160}
+                  step={4}
+                  value={colGap}
+                  onChange={(e) => setColGap(Number(e.target.value))}
+                />
+                <span className="topology-spacing-val">{colGap}</span>
+              </label>
+              <label className="topology-spacing" title="Vertical gap between cards within a column">
+                <span>Rows</span>
+                <input
+                  type="range"
+                  min={8}
+                  max={80}
+                  step={2}
+                  value={rowGap}
+                  onChange={(e) => setRowGap(Number(e.target.value))}
+                />
+                <span className="topology-spacing-val">{rowGap}</span>
+              </label>
+              {layoutTouched && (
+                <button
+                  onClick={resetLayout}
+                  className="topology-view-btn"
+                  title="Clear manual offsets and restore default spacing"
+                >Reset layout</button>
+              )}
+            </>
+          )}
         </div>
       </div>
 
@@ -559,12 +649,15 @@ export default function TopologyTab({ config, onNavigate }: Props) {
             ))}
           </svg>
 
-          <div className="topology-columns">
+          <div className="topology-columns" style={{ gap: colGap }}>
             {/* Listeners */}
-            <div className="topology-column">
-              <div className="topology-col-header" style={{ color: COLORS.listener.accent }}>Listeners</div>
+            <div className="topology-column" style={{ gap: rowGap }}>
+              <div className="topology-col-header" style={{ color: COLORS.listener.accent }}>
+                Listeners
+                <InfoIcon text="Sockets where nginx accepts connections (from each server block's `listen` directive). Shows IP:port plus protocol — http, https (with ssl), or stream (TCP/UDP). Click to see every server that binds to this listener." />
+              </div>
               {topologyData.listeners.map((l) => (
-                <div key={l.id} ref={(el) => { nodeRefs.current[l.id] = el }}>
+                <DraggableCardWrapper key={l.id} id={l.id}>
                   <NodeCard
                     title={`${l.ip === '0.0.0.0' ? '*' : l.ip}:${l.port}`}
                     badge={l.protocol}
@@ -572,35 +665,43 @@ export default function TopologyTab({ config, onNavigate }: Props) {
                     color={l.protocol === 'stream' ? COLORS.stream : COLORS.listener}
                     icon="S"
                     active={isActive(l.id)}
-                    onClick={() => select('listener', l.id)}
+                    tooltip="Listener — click to highlight every server bound to this IP:port."
+                    {...cardHandlers('listener', l.id)}
                     small
                   />
-                </div>
+                </DraggableCardWrapper>
               ))}
             </div>
 
             {/* Servers */}
-            <div className="topology-column">
-              <div className="topology-col-header" style={{ color: COLORS.server.accent }}>Server Blocks</div>
+            <div className="topology-column" style={{ gap: rowGap }}>
+              <div className="topology-col-header" style={{ color: COLORS.server.accent }}>
+                Server Blocks
+                <InfoIcon text="An http `server { }` block. Matches an incoming request by listen + server_name, then dispatches to its `location` blocks. Double-click to open this server in the Proxy Hosts tab." />
+              </div>
               {filteredServers.map((s) => (
-                <div key={s.id} ref={(el) => { nodeRefs.current[s.id] = el }}>
+                <DraggableCardWrapper key={s.id} id={s.id}>
                   <NodeCard
                     title={s.name}
                     subtitle={`${s.locations.length} location${s.locations.length !== 1 ? 's' : ''}`}
                     color={COLORS.server}
                     icon="H"
                     active={isActive(s.id)}
-                    onClick={() => { select('server', s.id); onNavigate('proxy') }}
+                    tooltip="Server block — click to trace its path, double-click to edit."
+                    {...cardHandlers('server', s.id, 'proxy')}
                   />
-                </div>
+                </DraggableCardWrapper>
               ))}
             </div>
 
             {/* Locations */}
-            <div className="topology-column">
-              <div className="topology-col-header" style={{ color: COLORS.location.accent }}>Locations</div>
+            <div className="topology-column" style={{ gap: rowGap }}>
+              <div className="topology-col-header" style={{ color: COLORS.location.accent }}>
+                Locations
+                <InfoIcon text="A `location` block inside a server. Decides how requests matching a URL pattern are handled — `proxy_pass` to an upstream or URL, `return` a status, serve a static `root`, etc. Badge shows the routing type." />
+              </div>
               {topologyData.locations.map((l) => (
-                <div key={l.id} ref={(el) => { nodeRefs.current[l.id] = el }}>
+                <DraggableCardWrapper key={l.id} id={l.id}>
                   <NodeCard
                     title={l.path}
                     subtitle={l.target ? `→ ${truncate(l.target, 26)}` : undefined}
@@ -619,19 +720,23 @@ export default function TopologyTab({ config, onNavigate }: Props) {
                     }
                     icon="L"
                     active={isActive(l.id)}
-                    onClick={() => select('location', l.id)}
+                    tooltip="Location — click to see the parent server and downstream target."
+                    {...cardHandlers('location', l.id, 'proxy')}
                     small
                   />
-                </div>
+                </DraggableCardWrapper>
               ))}
             </div>
 
             {/* Upstreams */}
             {topologyData.upstreams.length > 0 && (
-              <div className="topology-column">
-                <div className="topology-col-header" style={{ color: COLORS.upstream.accent }}>Upstreams</div>
+              <div className="topology-column" style={{ gap: rowGap }}>
+                <div className="topology-col-header" style={{ color: COLORS.upstream.accent }}>
+                  Upstreams
+                  <InfoIcon text="A named backend pool (`upstream { }`). Locations reach it via `proxy_pass http://<name>`. Badge shows the load-balancing algorithm (round robin, least_conn, ip_hash, …). Double-click to open the Upstreams tab." />
+                </div>
                 {topologyData.upstreams.map((u) => (
-                  <div key={u.id} ref={(el) => { nodeRefs.current[u.id] = el }}>
+                  <DraggableCardWrapper key={u.id} id={u.id}>
                     <NodeCard
                       title={u.name}
                       subtitle={`${u.servers.length} server${u.servers.length > 1 ? 's' : ''}`}
@@ -639,7 +744,8 @@ export default function TopologyTab({ config, onNavigate }: Props) {
                       color={COLORS.upstream}
                       icon="U"
                       active={isActive(u.id)}
-                      onClick={() => { select('upstream', u.id); onNavigate('upstreams') }}
+                      tooltip="Upstream — click to highlight every location that proxies to this pool."
+                      {...cardHandlers('upstream', u.id, 'upstreams')}
                     >
                       {isActive(u.id) && (
                         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -661,7 +767,7 @@ export default function TopologyTab({ config, onNavigate }: Props) {
                         </div>
                       )}
                     </NodeCard>
-                  </div>
+                  </DraggableCardWrapper>
                 ))}
               </div>
             )}

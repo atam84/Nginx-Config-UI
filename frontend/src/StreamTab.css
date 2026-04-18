@@ -168,7 +168,8 @@
   gap: 0.5rem;
 }
 
-.stream-server-item input[type='text'] {
+.stream-server-item input[type='text'],
+.stream-server-item input[type='number'] {
   font-family: inherit;
   font-size: 0.875rem;
   padding: 0.3rem 0.5rem;
@@ -197,7 +198,8 @@
   margin-top: 0.5rem;
 }
 
-.stream-server-add input[type='text'] {
+.stream-server-add input[type='text'],
+.stream-server-add input[type='number'] {
   font-family: inherit;
   font-size: 0.875rem;
   padding: 0.35rem 0.5rem;

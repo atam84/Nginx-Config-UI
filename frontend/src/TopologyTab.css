@@ -122,17 +122,18 @@
 
 .topology-columns {
   display: flex;
-  gap: 16px;
+  gap: 48px;
   position: relative;
   z-index: 1;
   min-width: fit-content;
+  align-items: flex-start;
 }
 
 .topology-column {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-width: 160px;
+  gap: 28px;
+  min-width: 180px;
 }
 
 .topology-col-header {
@@ -140,7 +141,82 @@
   text-transform: uppercase;
   letter-spacing: 0.12em;
   font-weight: 700;
-  margin-bottom: 2px;
+  margin-bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topology-draggable {
+  position: relative;
+  transition: transform 0.05s linear;
+  will-change: transform;
+}
+
+.topology-grip {
+  position: absolute;
+  top: 50%;
+  left: -16px;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #475569;
+  font-size: 10px;
+  font-family: monospace;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  border-radius: 3px;
+  opacity: 0.4;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  z-index: 2;
+}
+
+.topology-draggable:hover .topology-grip {
+  opacity: 1;
+}
+
+.topology-grip:hover {
+  color: #93c5fd;
+  background: #1e293b;
+}
+
+.topology-grip:active {
+  cursor: grabbing;
+  color: #3b82f6;
+}
+
+.topology-spacing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #1e293b;
+  background: #111827;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: default;
+}
+
+.topology-spacing input[type="range"] {
+  width: 80px;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
+.topology-spacing-val {
+  min-width: 22px;
+  text-align: right;
+  color: #93c5fd;
+  font-family: monospace;
+  font-size: 10px;
 }
 
 .topology-matrix-wrap {

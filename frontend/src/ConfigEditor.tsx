@@ -125,21 +125,11 @@ function findNode(nodes: Node[], name: string): Node | undefined {
 function findNodesInTree(nodes: Node[], name: string): Node[] {
   const out: Node[] = []
   function walk(n: Node) {
-    if (n.name === name) out.push(n)
+    if (n.type === 'block' && n.name === name) out.push(n)
     for (const c of n.directives ?? []) walk(c)
   }
   for (const n of nodes) walk(n)
   return out
-}
-
-function serverUsesAnyUpstream(server: Node, upstreamNames: string[]): boolean {
-  const locations = (server.directives ?? []).filter((d) => d.name === 'location')
-  for (const loc of locations) {
-    const proxyPass = (loc.directives ?? []).find((d) => d.name === 'proxy_pass')?.args?.[0] ?? ''
-    const normalized = proxyPass.replace(/^https?:\/\//, '')
-    if (upstreamNames.includes(normalized) || upstreamNames.includes(proxyPass)) return true
-  }
-  return false
 }
 
 interface ConfigEditorProps {
@@ -251,7 +241,6 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
   const upstreams = findNodesInTree(config?.directives ?? [], 'upstream')
   const servers = findNodesInTree(config?.directives ?? [], 'server')
   const upstreamNames = upstreams.map((u) => u.args?.[0]).filter(Boolean) as string[]
-  const directProxyHosts = servers.filter((s) => !serverUsesAnyUpstream(s, upstreamNames))
 
   const markDirty = useCallback((path: string, cfg: ConfigFile) => {
     pendingConfigsRef.current.set(path, cfg)
@@ -1026,7 +1015,7 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
                   className={tab === 'proxy' ? 'active' : ''}
                   onClick={() => setTab('proxy')}
                 >
-                  Proxy Hosts / Direct Targets ({directProxyHosts.length})
+                  Proxy Hosts / Direct Targets ({servers.length})
                 </button>
                 <button
                   className={tab === 'stream' ? 'active' : ''}
@@ -1096,7 +1085,7 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
                   upstreams={upstreams}
                   httpBlock={httpBlock}
                   config={config}
-                  mode="without_upstream"
+                  mode="all"
                   onUpdate={updateConfig}
                   readOnly={readOnly}
                 />

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { type ConfigFile, type Node, resolveInclude } from './api'
 import { setBlockDirective, setBlockDirectivesMulti } from './configUtils'
 import LogFormatBuilder from './LogFormatBuilder'
+import InfoIcon from './InfoIcon'
 import './HttpSettingsTab.css'
 
 // ─── Helpers for reading http block directives ────────────────────────────────
@@ -37,6 +38,17 @@ function applyToHttp(c: ConfigFile, fn: (dirs: Node[]) => Node[]): ConfigFile {
       ...dirs.slice(httpIdx + 1),
     ],
   }
+}
+
+function ensureSingle(dirs: Node[], name: string, args: string[]): Node[] {
+  if (dirs.some((d) => d.name === name)) return dirs
+  return [...dirs, { type: 'directive', name, args, enabled: true }]
+}
+
+function forceSingle(dirs: Node[], name: string, args: string[]): Node[] {
+  const idx = dirs.findIndex((d) => d.name === name)
+  if (idx === -1) return [...dirs, { type: 'directive', name, args, enabled: true }]
+  return dirs.map((d, i) => (i === idx ? { ...d, args, enabled: true } : d))
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -135,6 +147,72 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
 
   const setMulti = (name: string, items: { args: string[] }[]) =>
     onUpdate((c) => applyToHttp(c, (dirs) => setBlockDirectivesMulti(dirs, name, items)))
+
+  // ── Recommended-defaults presets ──
+  const applyPerformancePreset = () => {
+    onUpdate((c) => applyToHttp(c, (dirs) => {
+      let d = dirs
+      d = ensureSingle(d, 'sendfile', ['on'])
+      d = ensureSingle(d, 'tcp_nopush', ['on'])
+      d = ensureSingle(d, 'tcp_nodelay', ['on'])
+      d = ensureSingle(d, 'types_hash_max_size', ['2048'])
+      d = ensureSingle(d, 'keepalive_timeout', ['65'])
+      d = ensureSingle(d, 'keepalive_requests', ['1000'])
+      d = ensureSingle(d, 'client_max_body_size', ['10m'])
+      // Gzip defaults
+      d = forceSingle(d, 'gzip', ['on'])
+      d = ensureSingle(d, 'gzip_vary', ['on'])
+      d = ensureSingle(d, 'gzip_comp_level', ['5'])
+      d = ensureSingle(d, 'gzip_min_length', ['256'])
+      d = ensureSingle(d, 'gzip_proxied', ['any'])
+      d = ensureSingle(d, 'gzip_types', [
+        'text/plain', 'text/css', 'text/xml', 'application/json',
+        'application/javascript', 'application/xml+rss', 'application/atom+xml',
+        'image/svg+xml',
+      ])
+      return d
+    }))
+  }
+
+  const applyHardeningPreset = () => {
+    onUpdate((c) => applyToHttp(c, (dirs) => {
+      let d = dirs
+      d = forceSingle(d, 'server_tokens', ['off'])
+      // Modern TLS: TLSv1.2 + TLSv1.3
+      d = forceSingle(d, 'ssl_protocols', ['TLSv1.2', 'TLSv1.3'])
+      d = forceSingle(d, 'ssl_prefer_server_ciphers', ['on'])
+      d = ensureSingle(d, 'ssl_session_cache', ['shared:SSL:10m'])
+      d = ensureSingle(d, 'ssl_session_timeout', ['1d'])
+      d = ensureSingle(d, 'ssl_session_tickets', ['off'])
+      d = ensureSingle(d, 'ssl_ciphers', [
+        'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:' +
+        'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:' +
+        'ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305',
+      ])
+      return d
+    }))
+  }
+
+  const applyLoggingPreset = () => {
+    onUpdate((c) => applyToHttp(c, (dirs) => {
+      let d = dirs
+      // Add a named log_format 'main' if none exists
+      const hasAnyLogFormat = d.some((x) => x.name === 'log_format')
+      if (!hasAnyLogFormat) {
+        d = [...d, {
+          type: 'directive', name: 'log_format', enabled: true,
+          args: [
+            'main',
+            '$remote_addr - $remote_user [$time_local] "$request" ' +
+            '$status $body_bytes_sent "$http_referer" ' +
+            '"$http_user_agent" "$http_x_forwarded_for" rt=$request_time uct=$upstream_connect_time',
+          ],
+        }]
+      }
+      d = ensureSingle(d, 'access_log', ['/var/log/nginx/access.log', 'main'])
+      return d
+    }))
+  }
 
   // ── Performance ──
   const sendfile       = getToggle(httpBlock, 'sendfile')
@@ -334,10 +412,52 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
   return (
     <div className="http-settings">
 
+      {!readOnly && (
+        <div className="hs-presets">
+          <div className="hs-presets-header">
+            <span className="hs-presets-title">Recommended defaults</span>
+            <InfoIcon text="One-click presets that add sensible directives into the http { } block. Existing values are preserved except where noted on each button. Safe to re-apply." />
+          </div>
+          <div className="hs-presets-buttons">
+            <button
+              type="button"
+              className="hs-preset-btn"
+              onClick={applyPerformancePreset}
+              title="Sendfile/TCP tuning · keepalive · sensible body size · gzip on with common MIME types"
+            >
+              <span className="hs-preset-dot" style={{ background: '#22c55e' }} />
+              Apply performance defaults
+              <InfoIcon text="sendfile/tcp_nopush/tcp_nodelay on · types_hash_max_size 2048 · keepalive_timeout 65 · keepalive_requests 1000 · client_max_body_size 10m · gzip on with vary/comp_level 5/min_length 256/proxied any + common text MIME types. Existing values kept; gzip is forced on." />
+            </button>
+            <button
+              type="button"
+              className="hs-preset-btn"
+              onClick={applyHardeningPreset}
+              title="server_tokens off · TLS 1.2+1.3 only · modern ciphers · session cache tuning"
+            >
+              <span className="hs-preset-dot" style={{ background: '#f97316' }} />
+              Apply hardening defaults
+              <InfoIcon text="Forces: server_tokens off · ssl_protocols TLSv1.2 TLSv1.3 · ssl_prefer_server_ciphers on · modern ECDHE/GCM/CHACHA20 cipher list. Adds if missing: ssl_session_cache shared:SSL:10m · ssl_session_timeout 1d · ssl_session_tickets off." />
+            </button>
+            <button
+              type="button"
+              className="hs-preset-btn"
+              onClick={applyLoggingPreset}
+              title="Adds a 'main' log_format with timing fields · access_log → main"
+            >
+              <span className="hs-preset-dot" style={{ background: '#3b82f6' }} />
+              Apply logging defaults
+              <InfoIcon text="If no log_format exists, adds 'main' with request_time / upstream_connect_time fields useful for performance debugging, then sets access_log /var/log/nginx/access.log main (only if access_log is unset)." />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Performance ───────────────────────────────────────────────────── */}
       <CollapsibleSection
         id="performance"
         title="Performance"
+        info="Core http-block tuning: file-sending (sendfile), TCP framing (tcp_nopush, tcp_nodelay), keepalive, body-size limits, and hash table sizing. Most sites benefit from the performance preset above."
         open={openSections.has('performance')}
         onToggle={() => toggleSection('performance')}
       >
@@ -362,6 +482,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
       <CollapsibleSection
         id="compression"
         title="Compression (Gzip)"
+        info="Response compression (gzip). Compresses text-like bodies before sending. Higher gzip_comp_level = smaller payload but more CPU (5–6 is a good balance). gzip_types must explicitly list MIME types to compress — html is always included."
         open={openSections.has('compression')}
         onToggle={() => toggleSection('compression')}
       >
@@ -431,6 +552,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
       <CollapsibleSection
         id="ssl"
         title="SSL Defaults"
+        info="Global TLS settings inherited by all server blocks unless overridden. Use TLSv1.2 + TLSv1.3 only — older protocols (TLSv1, 1.1) have known weaknesses. ssl_prefer_server_ciphers only matters for TLSv1.2 (TLSv1.3 negotiation is different)."
         open={openSections.has('ssl')}
         onToggle={() => toggleSection('ssl')}
       >
@@ -468,6 +590,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
       <CollapsibleSection
         id="logging"
         title="Logging"
+        info="Access log format and destination. Define named log_format entries (e.g. 'main') then reference them from access_log. Set access_log to 'off' to disable globally; individual locations can override. $request_time and $upstream_response_time are especially useful for latency debugging."
         open={openSections.has('logging')}
         onToggle={() => toggleSection('logging')}
       >
@@ -571,6 +694,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
       <CollapsibleSection
         id="realip"
         title="Real IP"
+        info="When nginx sits behind another proxy/load balancer, use this to recover the original client IP. set_real_ip_from lists trusted upstream IPs/CIDRs, real_ip_header names the header to trust (usually X-Forwarded-For), real_ip_recursive on chooses the last non-trusted IP in a chain."
         open={openSections.has('realip')}
         onToggle={() => toggleSection('realip')}
       >
@@ -648,6 +772,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
       <CollapsibleSection
         id="maps"
         title="Maps"
+        info="`map $source $result { pattern value; ... }` builds lookup tables from a variable to another variable. Evaluated lazily — cheaper than if/set chains. Common use: connection upgrade for WebSockets, or routing based on Host header."
         open={openSections.has('maps')}
         onToggle={() => toggleSection('maps')}
       >
@@ -809,6 +934,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
       <CollapsibleSection
         id="ratelimit"
         title="Rate Limiting"
+        info="Defines shared memory zones for request throttling (`limit_req_zone`) and concurrency caps (`limit_conn_zone`). Zones declared here are then referenced from server/location blocks via limit_req / limit_conn. Key is typically $binary_remote_addr (≈16 KB per 1000 unique clients)."
         open={openSections.has('ratelimit')}
         onToggle={() => toggleSection('ratelimit')}
       >
@@ -1034,6 +1160,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
       <CollapsibleSection
         id="cachezones"
         title="Proxy Cache Zones"
+        info="`proxy_cache_path` declares on-disk cache areas and named zones. Locations opt in with `proxy_cache <zone>`. keys_zone sizes the in-memory index (≈8000 keys per MB); max_size caps disk usage; inactive evicts entries not accessed in that window."
         open={openSections.has('cachezones')}
         onToggle={() => toggleSection('cachezones')}
       >
@@ -1203,6 +1330,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
       <CollapsibleSection
         id="includes"
         title="Includes"
+        info="`include` pulls in additional directives from other files using globs (e.g. /etc/nginx/conf.d/*.conf). Use this to split config by concern (sites, snippets, mime types) rather than one monolithic file."
         open={openSections.has('includes')}
         onToggle={() => toggleSection('includes')}
       >
@@ -1306,6 +1434,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
       <CollapsibleSection
         id="geo"
         title="Geo / GeoIP"
+        info="`geo { }` maps IP/CIDR ranges to variables (pure config, no external data). `geoip2 { }` (ngx_http_geoip2_module) maps IPs to country/city using a MaxMind DB. Use the resulting variables in access rules, log formats, or routing maps."
         open={openSections.has('geo')}
         onToggle={() => toggleSection('geo')}
       >
@@ -1542,20 +1671,24 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
 // ─── Reusable sub-components ─────────────────────────────────────────────────
 
 function CollapsibleSection({
-  id, title, open, onToggle, children,
+  id, title, info, open, onToggle, children,
 }: {
   id: SectionId
   title: string
+  info?: string
   open: boolean
   onToggle: () => void
   children: React.ReactNode
 }) {
   return (
     <section className="hs-section" data-id={id}>
-      <button type="button" className="hs-section-btn" onClick={onToggle}>
-        <span className={`hs-chevron ${open ? 'open' : ''}`}>▶</span>
-        {title}
-      </button>
+      <div className="hs-section-header">
+        <button type="button" className="hs-section-btn" onClick={onToggle}>
+          <span className={`hs-chevron ${open ? 'open' : ''}`}>▶</span>
+          {title}
+        </button>
+        {info && <InfoIcon text={info} />}
+      </div>
       {open && <div className="hs-section-body">{children}</div>}
     </section>
   )

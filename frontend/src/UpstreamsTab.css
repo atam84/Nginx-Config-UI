@@ -35,6 +35,29 @@
   opacity: 0.9;
 }
 
+.btn-add-upstream-recommended {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn-add-upstream-recommended::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+}
+
+.btn-add-upstream-recommended:hover {
+  border-color: #3b82f6;
+  opacity: 1;
+}
+
 .btn-add-proxy {
   font-family: inherit;
   font-size: 0.9rem;
@@ -129,6 +152,7 @@
 }
 
 .upstream-field select,
+.upstream-field input[type='text'],
 .upstream-field input[type='number'] {
   font-family: inherit;
   font-size: 0.9rem;
@@ -256,6 +280,7 @@
 }
 
 .server-item input[type='text'],
+.server-item input[type='number'],
 .server-item .server-addr {
   font-family: inherit;
   font-size: 0.85rem;

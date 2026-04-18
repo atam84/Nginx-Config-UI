@@ -8,6 +8,7 @@ import {
   addUpstreamToConfig,
 } from './configUtils'
 import BlockContextMenu, { type BlockAction } from './BlockContextMenu'
+import InfoIcon from './InfoIcon'
 import './UpstreamsTab.css'
 
 interface Props {
@@ -147,6 +148,23 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
     onUpdate((c) => addUpstreamToConfig(c, newUpstream))
   }
 
+  const addRecommendedUpstream = () => {
+    const newUpstream: Node = {
+      type: 'block',
+      name: 'upstream',
+      args: ['backend'],
+      enabled: true,
+      id: `upstream-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      directives: [
+        { type: 'directive', name: 'least_conn', args: [], enabled: true },
+        { type: 'directive', name: 'keepalive', args: ['32'], enabled: true },
+        { type: 'directive', name: 'keepalive_requests', args: ['1000'], enabled: true },
+        { type: 'directive', name: 'keepalive_timeout', args: ['60s'], enabled: true },
+      ],
+    }
+    onUpdate((c) => addUpstreamToConfig(c, newUpstream))
+  }
+
   if (upstreams.length === 0) {
     return (
       <div className="upstreams-empty">
@@ -274,6 +292,15 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
           <button type="button" className="btn-add-upstream" onClick={addUpstream}>
             + Add upstream
           </button>
+          <button
+            type="button"
+            className="btn-add-upstream btn-add-upstream-recommended"
+            onClick={addRecommendedUpstream}
+            title="Creates an upstream pre-configured with: least_conn · keepalive 32 · keepalive_requests 1000 · keepalive_timeout 60s"
+          >
+            + Add upstream (recommended defaults)
+            <InfoIcon text="Creates a new upstream named 'backend' with a tuned default set: least_conn load balancing (fairer than round robin for uneven request durations), plus keepalive 32 + keepalive_requests 1000 + keepalive_timeout 60s to reuse TCP connections to the backend. Add your server entries after." />
+          </button>
           {onAddProxyHost && (
             <button type="button" className="btn-add-proxy" onClick={() => onAddProxyHost()}>
               + Add server (proxy_pass…)
@@ -355,7 +382,10 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
             </div>
 
             <div className="upstream-field">
-              <label>Load Balancing</label>
+              <label>
+                Load Balancing
+                <InfoIcon text="How nginx distributes requests across upstream servers. round_robin is the default (weighted); least_conn sends to the server with fewest active connections — good for uneven request durations; ip_hash pins clients to a specific server; hash and random are for custom/consistent hashing. least_time/queue/ntlm require Nginx Plus." />
+              </label>
               <select
                 value={algo}
                 onChange={(e) => setAlgo(up, e.target.value as AlgoType)}
@@ -398,7 +428,10 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
             </div>
 
             <div className="upstream-field">
-              <label>keepalive</label>
+              <label>
+                keepalive
+                <InfoIcon text={'Max idle connections to each upstream server that each worker keeps open. Reusing TCP/TLS connections drastically reduces latency and CPU. Start at 16–32 per server. Requires `proxy_http_version 1.1` and `proxy_set_header Connection ""` in the location block.'} />
+              </label>
               <input
                 type="number"
                 min={0}

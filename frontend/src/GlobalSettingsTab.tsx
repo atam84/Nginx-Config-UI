@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { type ConfigFile, type Node } from './api'
+import InfoIcon from './InfoIcon'
 import './GlobalSettingsTab.css'
 
 // ─── Events block helpers ─────────────────────────────────────────────────────
@@ -48,6 +49,25 @@ function ensureDirective(directives: Node[], name: string, defaultArgs: string[]
   return [...directives, { type: 'directive', name, args: defaultArgs, enabled: true }]
 }
 
+function mergeEventsBlock(directives: Node[], desired: Record<string, string[]>): Node[] {
+  const idx = directives.findIndex((d) => d.name === 'events' && d.type === 'block')
+  const desiredAsDirs = (existing: Node[] = []): Node[] => {
+    const existingNames = new Set(existing.map((d) => d.name))
+    const additions = Object.entries(desired)
+      .filter(([n]) => !existingNames.has(n))
+      .map(([n, args]) => ({ type: 'directive' as const, name: n, args, enabled: true }))
+    return [...existing, ...additions]
+  }
+  if (idx === -1) {
+    return [...directives, { type: 'block', name: 'events', args: [], enabled: true, directives: desiredAsDirs([]) }]
+  }
+  const existingBlock = directives[idx]
+  return directives.map((d, i) =>
+    i === idx ? { ...existingBlock, directives: desiredAsDirs(existingBlock.directives ?? []) } : d
+  )
+}
+
+
 interface Props {
   workerProcesses?: Node
   errorLog?: Node
@@ -81,7 +101,7 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
         ...c,
         directives: [
           ...c.directives,
-          { type: 'block' as const, name: 'events', enabled: true, directives: updater([]) },
+          { type: 'block' as const, name: 'events', args: [], enabled: true, directives: updater([]) },
         ],
       }
     })
@@ -96,14 +116,6 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
   }
 
   const setEventsToggle = (name: string, on: boolean) => setEventsDir(name, [on ? 'on' : 'off'])
-
-  const setEventsFlag = (name: string, present: boolean) => {
-    updateEventsBlock((dirs) => {
-      const without = dirs.filter((d) => d.name !== name)
-      if (!present) return without
-      return [...without, { type: 'directive' as const, name, args: [], enabled: true }]
-    })
-  }
   const extraDirectiveItems = directives
     .map((d, idx) => ({ d, idx }))
     .filter(
@@ -136,6 +148,46 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
     }))
   }
 
+  const applyPerformanceDefaults = () => {
+    onUpdate((c) => {
+      let dirs = c.directives
+      dirs = ensureDirective(dirs, 'worker_processes', ['auto'])
+      dirs = ensureDirective(dirs, 'worker_rlimit_nofile', ['65535'])
+      dirs = mergeEventsBlock(dirs, {
+        worker_connections: ['4096'],
+        multi_accept: ['on'],
+        use: ['epoll'],
+      })
+      return { ...c, directives: dirs }
+    })
+  }
+
+  const applyHardeningDefaults = () => {
+    onUpdate((c) => {
+      let dirs = c.directives
+      dirs = ensureDirective(dirs, 'user', ['www-data'])
+      dirs = ensureDirective(dirs, 'pid', ['/run/nginx.pid'])
+      dirs = ensureDirective(dirs, 'worker_shutdown_timeout', ['10s'])
+      // Downgrade error_log severity if set to debug/info (too verbose for prod)
+      dirs = dirs.map((d) => {
+        if (d.name !== 'error_log') return d
+        const level = d.args?.[1]
+        if (level === 'debug' || level === 'info') {
+          const args = [...(d.args ?? [])]
+          args[1] = 'warn'
+          return { ...d, args }
+        }
+        if (!level && d.args?.[0]) {
+          return { ...d, args: [d.args[0], 'warn'] }
+        }
+        return d
+      })
+      // Ensure error_log exists at all
+      dirs = ensureDirective(dirs, 'error_log', ['/var/log/nginx/error.log', 'warn'])
+      return { ...c, directives: dirs }
+    })
+  }
+
   const addExtraDirective = () => {
     const [name, ...argParts] = newDirectivePreset.split(':')
     const args = argParts.join(':')
@@ -156,8 +208,42 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
 
   return (
     <div className="global-settings">
+      {!readOnly && (
+        <div className="gs-presets">
+          <div className="gs-presets-header">
+            <span className="gs-presets-title">Recommended defaults</span>
+            <InfoIcon text="One-click presets that add sensible directives if they're missing. Existing values are preserved — nothing is overwritten except an over-verbose error_log level (debug/info → warn)." />
+          </div>
+          <div className="gs-presets-buttons">
+            <button
+              type="button"
+              className="gs-preset-btn"
+              onClick={applyPerformanceDefaults}
+              title="Adds: worker_processes auto · worker_rlimit_nofile 65535 · events{ worker_connections 4096, multi_accept on, use epoll }"
+            >
+              <span className="gs-preset-dot" style={{ background: '#22c55e' }} />
+              Apply performance defaults
+              <InfoIcon text="Sets worker_processes=auto, worker_rlimit_nofile=65535, and an events block with worker_connections=4096, multi_accept on, use epoll. Existing directives are kept." />
+            </button>
+            <button
+              type="button"
+              className="gs-preset-btn"
+              onClick={applyHardeningDefaults}
+              title="Adds: user www-data · pid /run/nginx.pid · worker_shutdown_timeout 10s · error_log …/error.log warn (lowers debug/info levels)"
+            >
+              <span className="gs-preset-dot" style={{ background: '#f97316' }} />
+              Apply hardening defaults
+              <InfoIcon text="Sets user=www-data (drops privileges), an explicit pid path, worker_shutdown_timeout=10s, and forces error_log severity to at least warn (overrides debug/info only — louder levels like error/crit are preserved)." />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="field">
-        <label>worker_processes</label>
+        <label>
+          worker_processes
+          <InfoIcon text="Number of worker processes. 'auto' = one per CPU core (recommended). Each worker handles connections independently in a single thread." />
+        </label>
         <div className="field-control">
           <select
             value={getArg(workerProcesses, 0) || 'auto'}
@@ -174,7 +260,10 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
       </div>
 
       <div className="field">
-        <label>error_log</label>
+        <label>
+          error_log
+          <InfoIcon text="Path + minimum severity. Use 'warn' or 'error' in production — 'debug' and 'info' are extremely verbose, fill disks quickly, and hurt performance." />
+        </label>
         <div className="field-control">
           <input
             type="text"
@@ -199,7 +288,10 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
       </div>
 
       <div className="field">
-        <label>pid</label>
+        <label>
+          pid
+          <InfoIcon text="Path where nginx writes the master process PID. systemd reads this to manage the service. Default: /run/nginx.pid (or /var/run/nginx.pid on older distros)." />
+        </label>
         <div className="field-control">
           <input
             type="text"
@@ -220,12 +312,16 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
         >
           <span className={`gs-events-chevron${eventsOpen ? ' open' : ''}`}>▶</span>
           Events
+          <InfoIcon text="The `events { }` block controls how nginx accepts and processes connections. Settings here define capacity (worker_connections), the I/O method (use), and acceptance behavior (multi_accept, accept_mutex)." />
         </button>
         {eventsOpen && (
           <div className="gs-events-body">
             <div className="gs-events-row">
               <div className="field gs-events-field">
-                <label>worker_connections</label>
+                <label>
+                  worker_connections
+                  <InfoIcon text="Max concurrent connections per worker. Total capacity ≈ worker_processes × worker_connections. 1024 is safe; raise to 4096–16384 for busy servers. Must not exceed the system open-file limit (worker_rlimit_nofile)." />
+                </label>
                 <div className="field-control">
                   <input
                     type="number"
@@ -238,7 +334,10 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
                 </div>
               </div>
               <div className="field gs-events-field">
-                <label>use</label>
+                <label>
+                  use
+                  <InfoIcon text="Connection-processing method. 'epoll' is the fastest on Linux (default on modern systems); 'kqueue' on BSD/macOS. Leave unset to let nginx auto-select the best method for the OS." />
+                </label>
                 <div className="field-control">
                   <select
                     value={getEventsArg(eventsBlock, 'use')}
@@ -255,7 +354,10 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
                 </div>
               </div>
               <div className="field gs-events-field">
-                <label>accept_mutex_delay</label>
+                <label>
+                  accept_mutex_delay
+                  <InfoIcon text="When accept_mutex is on, how long a worker waits before trying to accept new connections again after another worker got the lock. Default: 500ms. Only relevant if accept_mutex is on." />
+                </label>
                 <div className="field-control">
                   <input
                     type="text"
@@ -280,6 +382,7 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
                   <span className="gs-toggle-track" />
                 </span>
                 <span className="gs-toggle-name">multi_accept</span>
+                <InfoIcon text="If on, a worker accepts all pending connections in one go instead of one per event-loop iteration. Improves throughput under heavy concurrent load." />
               </label>
               <label className="gs-toggle-label">
                 <span className="gs-toggle-wrap">
@@ -293,6 +396,7 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
                   <span className="gs-toggle-track" />
                 </span>
                 <span className="gs-toggle-name">accept_mutex</span>
+                <InfoIcon text="Serializes which worker accepts new connections. Off by default on modern Linux — epoll + SO_REUSEPORT distributes connections more efficiently than a mutex." />
               </label>
             </div>
           </div>
@@ -301,7 +405,10 @@ export default function GlobalSettingsTab({ workerProcesses, errorLog, pid, dire
 
       <div className="extra-directives">
         <div className="extra-directives-header">
-          <label>Additional Global Directives</label>
+          <label>
+            Additional Global Directives
+            <InfoIcon text="Top-level (main{}) directives not covered above — e.g. `user`, `worker_rlimit_nofile`, `include` to pull in conf.d/sites-enabled, `load_module` for dynamic modules, `env` for environment variables passed to workers." />
+          </label>
           {!readOnly && (
             <div className="add-directive-controls">
               <select
