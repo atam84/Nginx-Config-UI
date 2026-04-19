@@ -44,7 +44,10 @@ func main() {
 	if dist := filepath.Join("frontend", "dist"); exists(dist) {
 		r.Static("/assets", filepath.Join(dist, "assets"))
 		r.NoRoute(func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.URL.Path, "/api") || strings.HasPrefix(c.Request.URL.Path, "/openapi") || c.Request.URL.Path == "/docs" || c.Request.URL.Path == "/health" {
+			p := c.Request.URL.Path
+			if strings.HasPrefix(p, "/api") || strings.HasPrefix(p, "/openapi") ||
+				p == "/docs" || p == "/health" ||
+				strings.HasPrefix(p, "/assets/") {
 				c.Status(http.StatusNotFound)
 				return
 			}

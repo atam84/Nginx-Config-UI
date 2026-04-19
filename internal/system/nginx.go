@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -156,11 +157,14 @@ func Status(cfg Config) StatusResult {
 		return StatusResult{Active: false, Output: "unmanaged (editor-only mode)"}
 
 	case ReloadModeSignal:
-		// pgrep -x matches the exact process name; exit 0 = running, 1 = none found.
-		if err := exec.Command("pgrep", "-x", "nginx").Run(); err != nil {
-			return StatusResult{Active: false, Output: "inactive"}
+		// Read the pid nginx writes when it daemonizes and verify the process is
+		// alive and is actually nginx. Avoids relying on pgrep: BusyBox pgrep -x
+		// matches the full cmdline ("nginx: master process nginx"), not comm,
+		// so `pgrep -x nginx` returns no match inside the Alpine container.
+		if nginxPidAlive() {
+			return StatusResult{Active: true, Output: "active"}
 		}
-		return StatusResult{Active: true, Output: "active"}
+		return StatusResult{Active: false, Output: "inactive"}
 
 	default:
 		cmd := exec.Command(cfg.SystemctlBin, "is-active", cfg.NginxService)
@@ -175,4 +179,25 @@ func Status(cfg Config) StatusResult {
 			Output: output,
 		}
 	}
+}
+
+func nginxPidAlive() bool {
+	for _, path := range []string{"/run/nginx.pid", "/var/run/nginx.pid"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil || pid <= 0 {
+			continue
+		}
+		comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(comm)) == "nginx" {
+			return true
+		}
+	}
+	return false
 }
