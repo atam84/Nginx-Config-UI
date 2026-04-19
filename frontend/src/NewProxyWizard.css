@@ -13,7 +13,10 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   width: 100%;
-  max-width: 480px;
+  max-width: 720px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
@@ -78,6 +81,22 @@
   text-align: right;
 }
 
+/* §44.3 — informational note shown on the gRPC wizard step */
+.wizard-note {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.65rem;
+  background: rgba(227, 160, 8, 0.12);
+  border: 1px solid var(--warning);
+  border-radius: 5px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.wizard-note strong {
+  color: var(--warning);
+}
+
 .wizard-header {
   display: flex;
   justify-content: space-between;
@@ -118,6 +137,8 @@
 
 .wizard-body {
   padding: 1.25rem;
+  overflow-y: auto;
+  flex: 1 1 auto;
 }
 
 .wizard-step label {

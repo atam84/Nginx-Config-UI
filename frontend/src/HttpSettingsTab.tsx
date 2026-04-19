@@ -60,6 +60,22 @@ const GZIP_PROXIED_OPTIONS = [
   'no_last_modified', 'no_etag', 'auth',
 ]
 
+/**
+ * §51.3 — curated MIME type list for the "Web-optimized" compression preset.
+ * Deliberately excludes pre-compressed formats: WOFF2 is internally Brotli-
+ * compressed, WOFF v1 is gzip/deflate-compressed, PNG/JPEG/MP4 have their
+ * own compression — recompressing wastes CPU without saving bytes. `text/html`
+ * is ALWAYS compressed by nginx so it's redundant to list it but harmless.
+ */
+const WEB_OPTIMIZED_COMPRESSION_TYPES: string[] = [
+  'text/plain', 'text/css', 'text/xml', 'text/javascript',
+  'application/javascript', 'application/json', 'application/ld+json',
+  'application/manifest+json', 'application/vnd.api+json',
+  'application/xml', 'application/xml+rss', 'application/atom+xml',
+  'application/rss+xml', 'application/xhtml+xml', 'application/wasm',
+  'image/svg+xml', 'image/x-icon',
+]
+
 const REAL_IP_HEADERS = ['X-Forwarded-For', 'X-Real-IP', 'X-Forwarded', 'Forwarded-For', 'True-Client-IP']
 
 const PROXY_CACHE_USE_STALE_OPTIONS = ['error', 'timeout', 'invalid_header', 'updating', 'http_500', 'http_502', 'http_503', 'http_504', 'http_403', 'http_404', 'off']
@@ -81,7 +97,7 @@ function buildCachePathArgs(z: { path: string; zoneName: string; zoneSize: strin
   return args
 }
 
-type SectionId = 'performance' | 'compression' | 'ssl' | 'logging' | 'realip' | 'includes' | 'maps' | 'ratelimit' | 'cachezones' | 'fcgicachezones' | 'geo'
+type SectionId = 'performance' | 'compression' | 'ssl' | 'logging' | 'realip' | 'includes' | 'maps' | 'splitclients' | 'ratelimit' | 'cachezones' | 'fcgicachezones' | 'geo' | 'resolver'
 
 // ─── Map block data ───────────────────────────────────────────────────────────
 
@@ -92,6 +108,15 @@ interface MapBlockData {
   hostnames: boolean
   volatile: boolean
   entries: { pattern: string; value: string }[]
+}
+
+// ─── split_clients block data (§49.2) ────────────────────────────────────────
+
+interface SplitClientsBlockData {
+  id?: string
+  sourceKey: string            // e.g. `"${remote_addr}AAA"` — quoted string or variable
+  resultVar: string            // e.g. `$variant`
+  entries: { percent: string; value: string }[]  // `5%` → `"v1"`, `*` → `"v0"` (fallback)
 }
 
 // ─── Geo block data ───────────────────────────────────────────────────────────
@@ -121,9 +146,11 @@ interface Props {
 
 export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props) {
   const [openSections, setOpenSections] = useState<Set<SectionId>>(
-    new Set<SectionId>(['performance', 'compression', 'ssl', 'logging', 'realip', 'includes', 'maps', 'ratelimit', 'cachezones', 'fcgicachezones', 'geo'])
+    new Set<SectionId>(['performance', 'compression', 'ssl', 'logging', 'realip', 'includes', 'maps', 'splitclients', 'ratelimit', 'cachezones', 'fcgicachezones', 'geo', 'resolver'])
   )
   const [newRealIpEntry, setNewRealIpEntry] = useState('')
+  // §55.4 — http-level resolver (DNS for egress proxy_pass / OCSP stapling)
+  const [newResolverIP, setNewResolverIP] = useState('')
   const [newInclude, setNewInclude] = useState('')
   const [resolvedIncludes, setResolvedIncludes] = useState<Record<number, string[]>>({})
   const [resolvingInclude, setResolvingInclude] = useState<number | null>(null)
@@ -216,6 +243,98 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
     }))
   }
 
+  /**
+   * §52.3 — JSON access-log preset. Adds a named log_format `main_json` with
+   * `escape=json` (escapes embedded quotes / control chars so the whole line
+   * stays valid JSON even when $request contains weird bytes) and a curated
+   * field set tuned for centralised log shippers (Loki, Fluent Bit, Datadog).
+   * Fields are emitted in a fixed order so downstream parsers can rely on
+   * schema stability across nginx restarts. Re-applying the preset is safe:
+   * if `main_json` already exists we keep the user's version; only adds
+   * access_log if unset.
+   */
+  const applyJsonAccessLogPreset = () => {
+    onUpdate((c) => applyToHttp(c, (dirs) => {
+      let d = dirs
+      const hasJsonFormat = d.some(
+        (x) => x.name === 'log_format' && x.args?.[0] === 'main_json'
+      )
+      if (!hasJsonFormat) {
+        // NOTE: each key:value pair is wrapped in quotes; $request_time /
+        // $bytes_sent / $status are emitted as bare numbers (escape=json
+        // drops the surrounding quotes for JSON-number-typed values only
+        // when they ARE numeric — the safest approach is quote everything
+        // and let the downstream parser cast types).
+        // Wrap the whole JSON in single quotes so the outer `{` doesn't look
+        // like a block-open to nginx's tokenizer and the embedded double
+        // quotes pass through untouched. No spaces inside the JSON so it
+        // stays a single arg token.
+        const jsonFields =
+          "'{" +
+          '"time":"$time_iso8601",' +
+          '"remote_addr":"$remote_addr",' +
+          '"remote_user":"$remote_user",' +
+          '"request":"$request",' +
+          '"method":"$request_method",' +
+          '"uri":"$request_uri",' +
+          '"status":"$status",' +
+          '"bytes_sent":"$bytes_sent",' +
+          '"body_bytes_sent":"$body_bytes_sent",' +
+          '"referer":"$http_referer",' +
+          '"user_agent":"$http_user_agent",' +
+          '"x_forwarded_for":"$http_x_forwarded_for",' +
+          '"host":"$host",' +
+          '"server_name":"$server_name",' +
+          '"request_time":"$request_time",' +
+          '"upstream_addr":"$upstream_addr",' +
+          '"upstream_status":"$upstream_status",' +
+          '"upstream_connect_time":"$upstream_connect_time",' +
+          '"upstream_response_time":"$upstream_response_time",' +
+          '"scheme":"$scheme",' +
+          '"ssl_protocol":"$ssl_protocol",' +
+          '"ssl_cipher":"$ssl_cipher",' +
+          '"request_id":"$request_id"' +
+          "}'"
+        d = [...d, {
+          type: 'directive', name: 'log_format', enabled: true,
+          args: ['main_json', 'escape=json', jsonFields],
+        }]
+      }
+      d = ensureSingle(d, 'access_log', ['/var/log/nginx/access.log', 'main_json'])
+      return d
+    }))
+  }
+
+  /**
+   * §51.3 — "Web-optimized" compression preset. Enables gzip AND brotli side-
+   * by-side (nginx picks the best encoding the client accepts via Accept-
+   * Encoding negotiation), plus `gzip_static on` so pre-compressed .gz files
+   * on disk are served directly without per-request CPU cost. Levels are
+   * middle-of-the-road (5/5) — higher levels eat more CPU per request without
+   * meaningfully better compression on typical web payloads. Uses `forceSingle`
+   * on the enable-flags so the preset is authoritative, but `ensureSingle` on
+   * the tuning values so user overrides survive re-applying.
+   */
+  const applyWebOptimizedCompression = () => {
+    onUpdate((c) => applyToHttp(c, (dirs) => {
+      let d = dirs
+      // --- gzip ---
+      d = forceSingle(d, 'gzip', ['on'])
+      d = ensureSingle(d, 'gzip_vary', ['on'])
+      d = ensureSingle(d, 'gzip_comp_level', ['5'])
+      d = ensureSingle(d, 'gzip_min_length', ['256'])
+      d = ensureSingle(d, 'gzip_proxied', ['any'])
+      d = ensureSingle(d, 'gzip_types', WEB_OPTIMIZED_COMPRESSION_TYPES)
+      d = ensureSingle(d, 'gzip_static', ['on'])
+      // --- brotli (ngx_brotli) ---
+      d = forceSingle(d, 'brotli', ['on'])
+      d = ensureSingle(d, 'brotli_comp_level', ['5'])
+      d = ensureSingle(d, 'brotli_types', WEB_OPTIMIZED_COMPRESSION_TYPES)
+      d = ensureSingle(d, 'brotli_static', ['on'])
+      return d
+    }))
+  }
+
   // ── Performance ──
   const sendfile       = getToggle(httpBlock, 'sendfile')
   const tcpNopush      = getToggle(httpBlock, 'tcp_nopush')
@@ -235,6 +354,18 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
   const gzipProxied     = getArgs(httpBlock, 'gzip_proxied')
   const gzipVary        = getToggle(httpBlock, 'gzip_vary')
   const gzipBuffers     = getArg(httpBlock, 'gzip_buffers')
+  // §51.2 — serve pre-compressed .gz / decompress gzip upstream responses.
+  // gzip_static accepts `on` / `off` / `always`; the tri-state is preserved
+  // rather than coerced to bool so users can pick the Always mode explicitly.
+  const gzipStatic      = getArg(httpBlock, 'gzip_static')
+  const gunzip          = getToggle(httpBlock, 'gunzip')
+  // §51.1 — Brotli (ngx_brotli third-party module). brotli_static mirrors
+  // gzip_static semantics — `on` = serve pre-compressed .br if both exist,
+  // `always` = serve .br even to clients that didn't send Accept-Encoding: br.
+  const brotliOn        = getToggle(httpBlock, 'brotli')
+  const brotliCompLevel = getArg(httpBlock, 'brotli_comp_level') || '6'
+  const brotliTypesArgs = getArgs(httpBlock, 'brotli_types')
+  const brotliStatic    = getArg(httpBlock, 'brotli_static')
 
   // ── SSL Defaults ──
   const sslProtocols          = getArgs(httpBlock, 'ssl_protocols')
@@ -254,6 +385,16 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
 
   // ── Includes ──
   const includes = getAllByName(httpBlock, 'include').map((d) => d.args?.[0] ?? '')
+
+  // ── §55.4 — DNS Resolver (http level) ──
+  // Shape of the `resolver` directive: `resolver IP [IP...] [valid=TIME] [ipv6=off] [ipv6=on] [status_zone=ZONE];`
+  const httpResolverDir    = httpBlock?.directives?.find((d) => d.name === 'resolver')
+  const httpResolverIPs    = (httpResolverDir?.args ?? [])
+    .filter((a) => !a.startsWith('valid=') && !a.startsWith('status_zone=') && !a.startsWith('ipv6='))
+  const httpResolverValid  = ((httpResolverDir?.args ?? []).find((a) => a.startsWith('valid=')) ?? '').replace('valid=', '')
+  const httpResolverIpv6Off = (httpResolverDir?.args ?? []).includes('ipv6=off')
+  const httpResolverStatusZone = ((httpResolverDir?.args ?? []).find((a) => a.startsWith('status_zone=')) ?? '').replace('status_zone=', '')
+  const httpResolverTimeout = getArg(httpBlock, 'resolver_timeout', 0)
 
   // ── Rate Limiting ──
   const reqZones = getAllByName(httpBlock, 'limit_req_zone').map((d) => {
@@ -323,6 +464,43 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
             ...(m.volatile ? [{ type: 'directive' as const, name: 'volatile', args: [] as string[], enabled: true }] : []),
             ...m.entries.map((e) => ({ type: 'directive' as const, name: e.pattern, args: [e.value], enabled: true })),
           ],
+        }))
+        return [...rest, ...nodes]
+      })
+    )
+  }
+
+  // ── split_clients blocks (§49.2) ──
+  const splitClientsBlocks = (httpBlock?.directives ?? []).filter(
+    (d) => d.name === 'split_clients' && d.type === 'block'
+  )
+
+  const splitClientsData: SplitClientsBlockData[] = splitClientsBlocks.map((block) => ({
+    id: block.id,
+    sourceKey: block.args?.[0] ?? '',
+    resultVar: block.args?.[1] ?? '',
+    entries: (block.directives ?? []).map((d) => ({
+      percent: d.name,
+      value: d.args?.[0] ?? '',
+    })),
+  }))
+
+  const updateSplitClientsBlocks = (splits: SplitClientsBlockData[]) => {
+    onUpdate((c) =>
+      applyToHttp(c, (dirs) => {
+        const rest = dirs.filter((d) => !(d.name === 'split_clients' && d.type === 'block'))
+        const nodes = splits.map((s) => ({
+          type: 'block' as const,
+          name: 'split_clients',
+          args: [s.sourceKey, s.resultVar],
+          enabled: true,
+          id: s.id || `split-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          directives: s.entries.map((e) => ({
+            type: 'directive' as const,
+            name: e.percent,
+            args: [e.value],
+            enabled: true,
+          })),
         }))
         return [...rest, ...nodes]
       })
@@ -403,6 +581,34 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
     )
   }
 
+  // ── §49.3 — cross-validation: collect all variables defined by map / geo /
+  // geoip2 / split_clients blocks in this http scope so (a) we can feed the
+  // datalist that powers autocomplete on source/result-var inputs, (b) we can
+  // flag duplicate-variable collisions inline, and (c) we can render a summary
+  // "Defined variables" banner so users can see what's available without
+  // scrolling through every block.
+  const definedVariables: Array<{ name: string; origin: string; detail: string }> = [
+    ...mapBlocksData
+      .map((m, i) => ({ name: m.resultVar, origin: `map[${i}]`, detail: `map ${m.sourceVar || '(no source)'} → ${m.resultVar}` }))
+      .filter((v) => v.name),
+    ...splitClientsData
+      .map((s, i) => ({ name: s.resultVar, origin: `split[${i}]`, detail: `split_clients ${s.sourceKey || '(no key)'} → ${s.resultVar}` }))
+      .filter((v) => v.name),
+    ...geoBlocksData
+      .map((g, i) => ({ name: g.resultVar, origin: `geo[${i}]`, detail: `geo ${g.sourceVar || '$remote_addr'} → ${g.resultVar}` }))
+      .filter((v) => v.name),
+    ...geoip2BlocksData.flatMap((g, gi) =>
+      g.bindings
+        .map((b) => ({ name: b.variable, origin: `geoip2[${gi}]`, detail: `geoip2 ${g.dbPath} → ${b.variable}` }))
+        .filter((v) => v.name)
+    ),
+  ]
+  // Count collisions (used for the summary panel badge and inline warnings).
+  const variableCounts = definedVariables.reduce<Record<string, number>>((acc, v) => {
+    acc[v.name] = (acc[v.name] ?? 0) + 1
+    return acc
+  }, {})
+
   if (!httpBlock) {
     return (
       <div className="http-settings">
@@ -453,6 +659,28 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
               Apply logging defaults
               <InfoIcon text="If no log_format exists, adds 'main' with request_time / upstream_connect_time fields useful for performance debugging, then sets access_log /var/log/nginx/access.log main (only if access_log is unset)." />
             </button>
+            {/* §52.3 — JSON access log preset */}
+            <button
+              type="button"
+              className="hs-preset-btn"
+              onClick={applyJsonAccessLogPreset}
+              title="Adds log_format main_json (escape=json) with structured fields, switches access_log → main_json. For shipping to Loki/Fluent Bit/Datadog/ELK."
+            >
+              <span className="hs-preset-dot" style={{ background: '#06b6d4' }} />
+              Apply JSON access logging
+              <InfoIcon text={'Adds a `log_format main_json escape=json { ... }` with ~22 structured fields (time, method, uri, status, bytes, upstream addr/status/timings, TLS protocol/cipher, request_id, X-Forwarded-For, etc.) — each line is valid JSON so log shippers like Fluent Bit / Loki / Filebeat / Datadog can parse without a regex. `escape=json` tells nginx to JSON-escape any embedded quotes, backslashes, and control chars in variable values — required, otherwise a pathological $request or $http_user_agent can produce invalid JSON and break ingestion. Then sets `access_log /var/log/nginx/access.log main_json`. Safe to re-apply: if `main_json` already exists your edits are kept, and access_log is only set when unset. Field order is stable, so downstream schemas can rely on it.'} />
+            </button>
+            {/* §51.3 — Web-optimized compression preset */}
+            <button
+              type="button"
+              className="hs-preset-btn"
+              onClick={applyWebOptimizedCompression}
+              title="Enables gzip + Brotli side-by-side with a curated MIME type list, plus gzip_static/brotli_static for pre-compressed assets"
+            >
+              <span className="hs-preset-dot" style={{ background: '#8b5cf6' }} />
+              Apply web-optimized compression
+              <InfoIcon text="Forces gzip on + brotli on with comp_level 5 for both (CPU/ratio sweet spot). MIME set covers JSON/XML/JS/CSS/SVG/WASM/manifests — NOT fonts (WOFF2 is already Brotli-compressed; WOFF1 is gzip-compressed) and NOT images/media (already compressed; re-compressing burns CPU for ~0% gain). Also enables gzip_static + brotli_static so pre-compressed .gz / .br files on disk are served directly without per-request compression cost. Safe to re-apply — existing tuning values are preserved, only the enable flags are authoritative. ⚠ brotli directives require the ngx_brotli module to be compiled in — if absent, nginx -t will reject the config." />
+            </button>
           </div>
         </div>
       )}
@@ -482,21 +710,29 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
         </div>
       </CollapsibleSection>
 
-      {/* ── Compression ───────────────────────────────────────────────────── */}
+      {/* ── Compression (Gzip + Brotli) ──────────────────────────────────── */}
       <CollapsibleSection
         id="compression"
-        title="Compression (Gzip)"
-        info="Response compression (gzip). Compresses text-like bodies before sending. Higher gzip_comp_level = smaller payload but more CPU (5–6 is a good balance). gzip_types must explicitly list MIME types to compress — html is always included."
+        title="Compression (Gzip + Brotli)"
+        info="Response compression — gzip is built into nginx core; Brotli requires the third-party ngx_brotli module (not shipped with stock nginx-oss). Run them side-by-side: clients advertising `Accept-Encoding: br, gzip` will get Brotli (smaller), others fall back to gzip. Level 5 is the CPU/ratio sweet spot for both. gzip_types / brotli_types must explicitly list MIME types — `text/html` is always compressed regardless. gzip_static + brotli_static serve pre-compressed files from disk so you pay the compression CPU cost at build time, not per-request."
         open={openSections.has('compression')}
         onToggle={() => toggleSection('compression')}
       >
+        {/* ── Gzip (core) ─────────────────────────────────────────────── */}
+        <h4 className="hs-sub-heading">
+          Gzip
+          <InfoIcon text="Built into nginx core (ngx_http_gzip_module). Compresses responses on-the-fly. Toggle gzip_vary on in any shared-cache scenario (CDN, Varnish, browsers behind a proxy) so the cache keys by Accept-Encoding." />
+        </h4>
         <div className="hs-toggle-grid">
           <ToggleField label="gzip"      value={gzipOn}   onChange={(v) => setToggle('gzip', v)}       readOnly={readOnly} />
           <ToggleField label="gzip_vary" value={gzipVary} onChange={(v) => setToggle('gzip_vary', v)}  readOnly={readOnly} />
         </div>
         <div className="hs-row">
           <div className="hs-field">
-            <label>gzip_comp_level <span className="hs-hint">1–9</span></label>
+            <label>
+              gzip_comp_level <span className="hs-hint">1–9</span>
+              <InfoIcon text="CPU vs size tradeoff. 1 = fastest, smallest payload gain; 9 = slowest, marginally smaller. 5–6 is the sweet spot — past level 6 you pay exponentially more CPU for a few percent smaller payloads. For dynamic content, 4–5 is safer." />
+            </label>
             <div className="hs-slider-row">
               <input
                 type="range" min="1" max="9"
@@ -511,7 +747,10 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
           <TextField label="gzip_buffers"    value={gzipBuffers}   placeholder="16 8k" onChange={(v) => setDir('gzip_buffers', v ? v.split(/\s+/).filter(Boolean) : [])} readOnly={readOnly} />
         </div>
         <div className="hs-field">
-          <label>gzip_proxied</label>
+          <label>
+            gzip_proxied
+            <InfoIcon text="When this nginx is itself an upstream behind another proxy/CDN, this list controls which upstream responses to compress based on headers. `any` = always compress. `off` = never compress proxied responses. Other values gate on specific response headers (e.g. `expired` compresses only cache-expired responses). `any` is fine for most reverse-proxy setups." />
+          </label>
           <div className="hs-checkbox-group">
             {GZIP_PROXIED_OPTIONS.map((opt) => (
               <label key={opt} className="hs-check-label">
@@ -537,7 +776,10 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
           </div>
         </div>
         <div className="hs-field">
-          <label>gzip_types <span className="hs-hint">space-separated MIME types</span></label>
+          <label>
+            gzip_types <span className="hs-hint">space-separated MIME types</span>
+            <InfoIcon text="Content types eligible for on-the-fly compression. `text/html` is implicit and doesn't need to be listed. Skip pre-compressed formats (image/png, image/jpeg, video/*, application/zip, font/woff2) — recompressing them wastes CPU. The web-optimized preset seeds a curated list." />
+          </label>
           <textarea
             className="hs-textarea"
             value={gzipTypesArgs.join(' ')}
@@ -547,6 +789,110 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
             }}
             readOnly={readOnly}
             placeholder="text/plain text/css application/json application/javascript"
+            rows={3}
+          />
+        </div>
+
+        {/* §51.2 — gzip_static + gunzip (native) */}
+        <div className="hs-field hs-compression-subrow">
+          <label>
+            Pre-compressed &amp; upstream decompression
+            <InfoIcon text="gzip_static: if both `app.js` and `app.js.gz` exist on disk, serve the `.gz` directly to gzip-capable clients — zero per-request CPU. Use `always` to serve `.gz` even to clients without Accept-Encoding: gzip (rare; requires Content-Encoding negotiation elsewhere). gunzip: when an upstream serves gzip-encoded responses but a client doesn't accept gzip, nginx decompresses on the fly so the client gets plain text — useful for legacy clients or when inspecting upstream responses with subs_filter/addition." />
+          </label>
+          <div className="hs-toggle-grid">
+            <div className="hs-field">
+              <label>gzip_static</label>
+              <select
+                value={gzipStatic || 'off'}
+                onChange={(e) => {
+                  const v = e.target.value
+                  if (v === 'off') setDir('gzip_static', [])
+                  else setDir('gzip_static', [v])
+                }}
+                disabled={readOnly}
+                title="Serve pre-compressed .gz files from disk when available"
+              >
+                <option value="off">off (disabled)</option>
+                <option value="on">on (serve .gz when client accepts gzip)</option>
+                <option value="always">always (serve .gz regardless of Accept-Encoding)</option>
+              </select>
+            </div>
+            <ToggleField
+              label="gunzip"
+              value={gunzip}
+              onChange={(v) => {
+                if (v) setDir('gunzip', ['on'])
+                else setDir('gunzip', [])
+              }}
+              readOnly={readOnly}
+            />
+          </div>
+        </div>
+
+        {/* §51.1 — Brotli (ngx_brotli third-party module) */}
+        <h4 className="hs-sub-heading hs-sub-brotli">
+          Brotli <span className="hs-hint">requires <code>ngx_brotli</code></span>
+          <InfoIcon text={'Brotli (RFC 7932) compresses ~15-25% better than gzip on text-like content, at similar CPU cost (level 4-5). NOT in stock nginx — you need the third-party ngx_brotli module compiled in. Verify with `nginx -V 2>&1 | grep brotli` or check your build for --add-dynamic-module=ngx_brotli. On Debian/Ubuntu the `libnginx-mod-brotli` package loads it; on Alpine use `nginx-mod-http-brotli`. Enabling these toggles without the module will cause nginx -t to fail with "unknown directive \\"brotli\\""— we cannot detect module presence from the UI, so the check happens when you Save + Reload.'} />
+        </h4>
+        <div className="hs-toggle-grid">
+          <ToggleField
+            label="brotli"
+            value={brotliOn}
+            onChange={(v) => setToggle('brotli', v)}
+            readOnly={readOnly}
+          />
+          <div className="hs-field">
+            <label>
+              brotli_static
+              <InfoIcon text="Same semantics as gzip_static but for .br files. Build pipelines like webpack / esbuild / rspack produce `.br` files alongside `.js` / `.css` — pre-compressing at build time with the highest level (11) gives you max compression at zero per-request CPU." />
+            </label>
+            <select
+              value={brotliStatic || 'off'}
+              onChange={(e) => {
+                const v = e.target.value
+                if (v === 'off') setDir('brotli_static', [])
+                else setDir('brotli_static', [v])
+              }}
+              disabled={readOnly}
+              title="Serve pre-compressed .br files from disk when available"
+            >
+              <option value="off">off (disabled)</option>
+              <option value="on">on (serve .br when client accepts br)</option>
+              <option value="always">always (serve .br regardless of Accept-Encoding)</option>
+            </select>
+          </div>
+        </div>
+        <div className="hs-row">
+          <div className="hs-field">
+            <label>
+              brotli_comp_level <span className="hs-hint">0–11</span>
+              <InfoIcon text="Brotli range is 0–11 (wider than gzip's 1–9). 11 is slow — only useful at build time for brotli_static files. 4–5 is the dynamic-compression sweet spot; going above 6 rarely pays off for on-the-fly responses. 0 disables compression (keeps framing)." />
+            </label>
+            <div className="hs-slider-row">
+              <input
+                type="range" min="0" max="11"
+                value={brotliCompLevel}
+                onChange={(e) => setDir('brotli_comp_level', [e.target.value])}
+                disabled={readOnly}
+              />
+              <span className="hs-slider-val">{brotliCompLevel}</span>
+            </div>
+          </div>
+        </div>
+        <div className="hs-field">
+          <label>
+            brotli_types <span className="hs-hint">space-separated MIME types</span>
+            <InfoIcon text="Same convention as gzip_types. You can safely mirror gzip_types here so both encodings cover the same content set. `text/html` is always compressed." />
+          </label>
+          <textarea
+            className="hs-textarea"
+            value={brotliTypesArgs.join(' ')}
+            onChange={(e) => {
+              const types = e.target.value.split(/\s+/).filter(Boolean)
+              setDir('brotli_types', types)
+            }}
+            readOnly={readOnly}
+            placeholder="text/plain text/css application/json application/javascript image/svg+xml"
             rows={3}
           />
         </div>
@@ -772,6 +1118,221 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
         </div>
       </CollapsibleSection>
 
+      {/* ── §55.4 — DNS Resolver (http level) ───────────────────────────── */}
+      <CollapsibleSection
+        id="resolver"
+        title="DNS Resolver"
+        info={'HTTP-level resolver for egress DNS — applies to every proxy_pass / fastcgi_pass / grpc_pass / uwsgi_pass that uses a hostname (not an IP or named upstream), plus OCSP stapling lookups. Required when any outbound target contains `$variables`. Without it nginx only resolves hostnames once, at config load, so if a backend\'s DNS record changes you must `nginx -s reload` to pick it up. A server-level resolver overrides this for its server block.'}
+        open={openSections.has('resolver')}
+        onToggle={() => toggleSection('resolver')}
+      >
+        <div className="hs-field">
+          <div className="hs-list-header">
+            <label>
+              resolver IPs
+              <InfoIcon text={'One or more DNS server IPs that nginx uses to resolve hostnames at request time. Public options: 1.1.1.1 (Cloudflare), 8.8.8.8 (Google), 9.9.9.9 (Quad9). In a cloud environment, your VPC resolver (e.g. 169.254.169.253 on AWS, 168.63.129.16 on Azure, metadata.google.internal on GCP) is usually correct. List order matters: nginx queries them in order, failing over on timeout. Hostnames (not IPs) are NOT allowed here — chicken-and-egg problem.'} />
+            </label>
+            {!readOnly && (
+              <div className="hs-add-row">
+                <input
+                  type="text"
+                  value={newResolverIP}
+                  onChange={(e) => setNewResolverIP(e.target.value)}
+                  placeholder="1.1.1.1 or 8.8.8.8"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newResolverIP.trim()) {
+                      const v = newResolverIP.trim()
+                      const next = [...httpResolverIPs, v]
+                      const args = [
+                        ...next,
+                        ...(httpResolverValid ? [`valid=${httpResolverValid}`] : []),
+                        ...(httpResolverIpv6Off ? ['ipv6=off'] : []),
+                        ...(httpResolverStatusZone ? [`status_zone=${httpResolverStatusZone}`] : []),
+                      ]
+                      setDir('resolver', args)
+                      setNewResolverIP('')
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="hs-btn-add"
+                  onClick={() => {
+                    const v = newResolverIP.trim()
+                    if (!v) return
+                    const next = [...httpResolverIPs, v]
+                    const args = [
+                      ...next,
+                      ...(httpResolverValid ? [`valid=${httpResolverValid}`] : []),
+                      ...(httpResolverIpv6Off ? ['ipv6=off'] : []),
+                      ...(httpResolverStatusZone ? [`status_zone=${httpResolverStatusZone}`] : []),
+                    ]
+                    setDir('resolver', args)
+                    setNewResolverIP('')
+                  }}
+                >
+                  + Add
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="hs-tags">
+            {httpResolverIPs.map((ip, i) => (
+              <span key={i} className="hs-tag">
+                {ip}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className="hs-tag-remove"
+                    onClick={() => {
+                      const next = httpResolverIPs.filter((_, j) => j !== i)
+                      const args = [
+                        ...next,
+                        ...(httpResolverValid ? [`valid=${httpResolverValid}`] : []),
+                        ...(httpResolverIpv6Off ? ['ipv6=off'] : []),
+                        ...(httpResolverStatusZone ? [`status_zone=${httpResolverStatusZone}`] : []),
+                      ]
+                      setDir('resolver', args.length ? args : [])
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
+            ))}
+            {httpResolverIPs.length === 0 && <span className="hs-empty">No resolver configured — egress DNS only works for upstreams defined with literal IPs.</span>}
+          </div>
+        </div>
+
+        <div className="hs-row">
+          <div className="hs-field">
+            <label>
+              valid=
+              <InfoIcon text={'Override the DNS record TTL nginx respects. Example: `valid=300s` caches resolved IPs for 5 minutes regardless of what the TTL is. Useful when upstream DNS has very short TTLs (cost) or very long ones (staleness during failovers). Omit to honour the actual TTL.'} />
+            </label>
+            <input
+              type="text"
+              value={httpResolverValid}
+              placeholder="300s"
+              readOnly={readOnly}
+              onChange={(e) => {
+                const args = [
+                  ...httpResolverIPs,
+                  ...(e.target.value ? [`valid=${e.target.value}`] : []),
+                  ...(httpResolverIpv6Off ? ['ipv6=off'] : []),
+                  ...(httpResolverStatusZone ? [`status_zone=${httpResolverStatusZone}`] : []),
+                ]
+                setDir('resolver', args.length ? args : [])
+              }}
+            />
+          </div>
+          <div className="hs-field">
+            <label>
+              resolver_timeout
+              <InfoIcon text={'How long nginx waits for a DNS response before giving up. Default 30s. Short timeouts (1s–5s) cause requests to 502 faster when DNS is broken — better than hanging. Long timeouts (30s+) absorb brief DNS resolver hiccups but hold onto request slots / worker resources.'} />
+            </label>
+            <input
+              type="text"
+              value={httpResolverTimeout}
+              placeholder="30s"
+              readOnly={readOnly}
+              onChange={(e) => setDir('resolver_timeout', e.target.value ? [e.target.value] : [])}
+            />
+          </div>
+          <div className="hs-field">
+            <label>
+              status_zone=
+              <InfoIcon text={'Nginx Plus only — name of a shared-memory zone where resolver stats are exposed via the Plus /api & dashboard (queries per second, cache hits/misses). Open-source nginx parses the directive (no error) but doesn\'t emit stats. Name is free-form.'} />
+              <span className="nginx-plus-badge" title="status_zone= field is Nginx Plus only (parsed but ignored by OSS).">Plus</span>
+            </label>
+            <input
+              type="text"
+              value={httpResolverStatusZone}
+              placeholder="resolver_zone"
+              readOnly={readOnly}
+              onChange={(e) => {
+                const args = [
+                  ...httpResolverIPs,
+                  ...(httpResolverValid ? [`valid=${httpResolverValid}`] : []),
+                  ...(httpResolverIpv6Off ? ['ipv6=off'] : []),
+                  ...(e.target.value ? [`status_zone=${e.target.value}`] : []),
+                ]
+                setDir('resolver', args.length ? args : [])
+              }}
+            />
+          </div>
+          <div className="hs-field">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', marginTop: '1.6rem' }}>
+              <input
+                type="checkbox"
+                checked={httpResolverIpv6Off}
+                disabled={readOnly}
+                onChange={(e) => {
+                  const args = [
+                    ...httpResolverIPs,
+                    ...(httpResolverValid ? [`valid=${httpResolverValid}`] : []),
+                    ...(e.target.checked ? ['ipv6=off'] : []),
+                    ...(httpResolverStatusZone ? [`status_zone=${httpResolverStatusZone}`] : []),
+                  ]
+                  setDir('resolver', args.length ? args : [])
+                }}
+              />
+              ipv6=off
+              <InfoIcon text={'Disable AAAA (IPv6) lookups. Enable this when running in an IPv4-only environment where AAAA lookups time out rather than return NXDOMAIN — otherwise every DNS query pays a +N-second penalty waiting for the AAAA to fail. Harmless to leave off on dual-stack networks.'} />
+            </label>
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      {/* §49.3 — Defined Variables summary panel (cross-validation visibility) */}
+      {definedVariables.length > 0 && (
+        <div className="hs-defined-vars-panel">
+          <div className="hs-defined-vars-header">
+            <span className="hs-defined-vars-title">
+              Defined Variables
+              <InfoIcon text="Summary of variables defined by the map / split_clients / geo / geoip2 blocks below. Reference these by name in other directives (proxy_pass, limit_req zones, log formats, access rules, etc.). Source-variable inputs in the blocks below support autocomplete from this list — start typing `$` and your browser will suggest matches. Duplicate names are flagged inline — nginx will refuse to start with 'duplicate variable' errors on reload." />
+            </span>
+            <span className="hs-defined-vars-count">
+              {definedVariables.length} variable{definedVariables.length !== 1 ? 's' : ''}
+              {Object.values(variableCounts).some((c) => c > 1) && (
+                <span className="hs-warn"> · ⚠ {Object.entries(variableCounts).filter(([, c]) => c > 1).length} duplicate</span>
+              )}
+            </span>
+          </div>
+          <div className="hs-defined-vars-list">
+            {definedVariables.map((v, i) => (
+              <span
+                key={`${v.name}-${i}`}
+                className={`hs-defined-var-chip${variableCounts[v.name] > 1 ? ' hs-defined-var-dup' : ''}`}
+                title={v.detail}
+              >
+                <code>{v.name}</code>
+                <span className="hs-defined-var-origin">{v.origin.replace(/\[\d+\]/, '')}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Shared autocomplete datalist feeding every variable input in this tab. */}
+      <datalist id="hs-defined-vars">
+        {definedVariables.map((v, i) => (
+          <option key={`${v.name}-${i}`} value={v.name}>{v.detail}</option>
+        ))}
+        {/* A handful of nginx built-ins so users can autocomplete them too. */}
+        <option value="$remote_addr">client IP</option>
+        <option value="$http_x_forwarded_for">XFF header (trusted-proxy aware)</option>
+        <option value="$http_origin">CORS Origin header</option>
+        <option value="$http_host">Host header</option>
+        <option value="$host">normalized Host (header / line / server_name)</option>
+        <option value="$request_uri">original URI with query string</option>
+        <option value="$uri">normalized URI</option>
+        <option value="$args">query string</option>
+        <option value="$scheme">http or https</option>
+        <option value="$request_method">GET / POST / …</option>
+        <option value="$binary_remote_addr">packed client IP (for rate-limit keys)</option>
+      </datalist>
+
       {/* ── Maps ──────────────────────────────────────────────────────────── */}
       <CollapsibleSection
         id="maps"
@@ -781,15 +1342,18 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
         onToggle={() => toggleSection('maps')}
       >
         {mapBlocksData.length === 0 && <p className="hs-empty">No map blocks defined.</p>}
-        {mapBlocksData.map((m, mi) => (
+        {mapBlocksData.map((m, mi) => {
+          const dupResult = m.resultVar && variableCounts[m.resultVar] > 1
+          return (
           <div key={m.id ?? mi} className="hs-map-card">
             <div className="hs-map-header">
               <div className="hs-field hs-input-grow">
-                <label>source variable</label>
+                <label>source variable <InfoIcon text="The input variable whose value gets matched against the pattern list below. Common sources: $http_upgrade (for WebSocket routing), $http_host, $request_uri, or a variable defined by an upstream map/geo/split_clients block. Autocomplete suggests variables already defined in this http block plus common nginx built-ins." /></label>
                 <input
                   type="text"
                   value={m.sourceVar}
                   placeholder="$variable"
+                  list="hs-defined-vars"
                   readOnly={readOnly}
                   onChange={(e) => {
                     const next = mapBlocksData.map((x, j) => j === mi ? { ...x, sourceVar: e.target.value } : x)
@@ -798,7 +1362,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
                 />
               </div>
               <div className="hs-field hs-input-grow">
-                <label>result variable</label>
+                <label>result variable <InfoIcon text="The variable this map defines — reference it in downstream directives like proxy_pass, access rules, or another map's source. Must start with $ and be unique across all map/geo/split_clients blocks in this http block." /></label>
                 <input
                   type="text"
                   value={m.resultVar}
@@ -821,6 +1385,11 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
                 </button>
               )}
             </div>
+            {dupResult && (
+              <div className="hs-warn hs-var-collision">
+                ⚠ <code>{m.resultVar}</code> is already defined by another block in this http scope — nginx will reject the config with "duplicate variable" on reload.
+              </div>
+            )}
             <div className="hs-toggle-grid">
               <ToggleField
                 label="hostnames"
@@ -910,7 +1479,8 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
               )}
             </div>
           </div>
-        ))}
+          )
+        })}
         {!readOnly && (
           <button
             type="button"
@@ -930,6 +1500,193 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
             }
           >
             + Add map
+          </button>
+        )}
+      </CollapsibleSection>
+
+      {/* ── Split Clients (§49.2) ─────────────────────────────────────────── */}
+      <CollapsibleSection
+        id="splitclients"
+        title="Split Clients (A/B testing)"
+        info={'`split_clients "<source>" $result { 5% "v1"; 10% "v2"; * "v0"; }` deterministically bucketizes requests by hashing the source key and assigning a percentage to each value — cornerstone of feature-flag / canary rollouts. The source key is typically `"${remote_addr}AAA"` (quoted so the suffix salts the hash). Percentages must sum to ≤100%; the `*` row is the fallback for remaining traffic and should always be present. The mapping is STABLE for a given source key — the same client lands in the same bucket on every request. To re-shuffle assignments (e.g. after rebalancing a test), change the salt suffix in the source key. Note: percentages are evaluated top-to-bottom; nginx picks the FIRST matching bucket, not a weighted random draw.'}
+        open={openSections.has('splitclients')}
+        onToggle={() => toggleSection('splitclients')}
+      >
+        {splitClientsData.length === 0 && <p className="hs-empty">No split_clients blocks defined.</p>}
+        {splitClientsData.map((s, si) => {
+          // Sum of numeric percent entries (ignores `*` fallback). Warn if > 100 or if `*` missing.
+          const numericSum = s.entries.reduce((acc, e) => {
+            const m = /^(\d+(?:\.\d+)?)\s*%?$/.exec(e.percent.trim())
+            return acc + (m ? parseFloat(m[1]) : 0)
+          }, 0)
+          const hasFallback = s.entries.some((e) => e.percent.trim() === '*')
+          const dupResult = s.resultVar && variableCounts[s.resultVar] > 1
+          return (
+            <div key={s.id ?? si} className="hs-map-card">
+              <div className="hs-map-header">
+                <div className="hs-field hs-input-grow">
+                  <label>
+                    source key
+                    <InfoIcon text={'The value being hashed to pick a bucket. Almost always a quoted string that interpolates a variable plus a salt suffix, e.g. `"${remote_addr}AAA"`. The salt lets you reshuffle bucket assignments without changing the variable — change AAA → BBB to re-randomize. Without the suffix the same client IP always lands in the same bucket across restarts, which is usually what you want for sticky A/B tests. Supports variables defined by map/geo blocks as part of the string.'} />
+                    <span className="hs-hint">hashed for bucketing</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={s.sourceKey}
+                    placeholder='"${remote_addr}AAA"'
+                    readOnly={readOnly}
+                    onChange={(e) => {
+                      const next = splitClientsData.map((x, j) => j === si ? { ...x, sourceKey: e.target.value } : x)
+                      updateSplitClientsBlocks(next)
+                    }}
+                  />
+                </div>
+                <div className="hs-field hs-input-grow">
+                  <label>
+                    result variable
+                    <InfoIcon text="The variable this split_clients block defines — typically used downstream in a proxy_pass to route to one of several backend pools (e.g. $backend_pool → `proxy_pass http://$backend_pool`). Must be unique across map/geo/split_clients blocks." />
+                  </label>
+                  <input
+                    type="text"
+                    value={s.resultVar}
+                    placeholder="$variant"
+                    readOnly={readOnly}
+                    onChange={(e) => {
+                      const next = splitClientsData.map((x, j) => j === si ? { ...x, resultVar: e.target.value } : x)
+                      updateSplitClientsBlocks(next)
+                    }}
+                  />
+                </div>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className="hs-btn-remove"
+                    title="Remove split_clients block"
+                    onClick={() => updateSplitClientsBlocks(splitClientsData.filter((_, j) => j !== si))}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              {dupResult && (
+                <div className="hs-warn hs-var-collision">
+                  ⚠ <code>{s.resultVar}</code> is already defined by another block in this http scope — nginx will reject the config with "duplicate variable" on reload.
+                </div>
+              )}
+              <div className="hs-map-entries">
+                <div className="hs-list-header">
+                  <label>buckets</label>
+                  <span className="hs-hint">
+                    {numericSum > 100 && <span className="hs-warn">⚠ sums to {numericSum.toFixed(1)}% (&gt; 100)</span>}
+                    {numericSum <= 100 && !hasFallback && <span className="hs-warn">⚠ no <code>*</code> fallback — requests outside {numericSum.toFixed(1)}% get empty string</span>}
+                    {numericSum <= 100 && hasFallback && <>{numericSum.toFixed(1)}% assigned, {(100 - numericSum).toFixed(1)}% to fallback</>}
+                  </span>
+                </div>
+                {s.entries.length === 0 && <p className="hs-empty">No buckets yet.</p>}
+                {s.entries.map((entry, ei) => (
+                  <div key={ei} className="hs-map-entry-row">
+                    <input
+                      type="text"
+                      value={entry.percent}
+                      placeholder="5% or *"
+                      readOnly={readOnly}
+                      className="hs-input-name"
+                      title="Percentage (e.g. `5%`, `0.5%`) or `*` for the catch-all fallback"
+                      onChange={(e) => {
+                        const next = splitClientsData.map((x, j) =>
+                          j === si
+                            ? { ...x, entries: x.entries.map((en, k) => k === ei ? { ...en, percent: e.target.value } : en) }
+                            : x
+                        )
+                        updateSplitClientsBlocks(next)
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={entry.value}
+                      placeholder='"v1"'
+                      readOnly={readOnly}
+                      className="hs-input-grow"
+                      onChange={(e) => {
+                        const next = splitClientsData.map((x, j) =>
+                          j === si
+                            ? { ...x, entries: x.entries.map((en, k) => k === ei ? { ...en, value: e.target.value } : en) }
+                            : x
+                        )
+                        updateSplitClientsBlocks(next)
+                      }}
+                    />
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        className="hs-btn-remove"
+                        onClick={() => {
+                          const next = splitClientsData.map((x, j) =>
+                            j === si ? { ...x, entries: x.entries.filter((_, k) => k !== ei) } : x
+                          )
+                          updateSplitClientsBlocks(next)
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {!readOnly && (
+                  <div className="hs-split-actions">
+                    <button
+                      type="button"
+                      className="hs-btn-add"
+                      onClick={() => {
+                        const next = splitClientsData.map((x, j) =>
+                          j === si ? { ...x, entries: [...x.entries, { percent: '', value: '' }] } : x
+                        )
+                        updateSplitClientsBlocks(next)
+                      }}
+                    >
+                      + Add bucket
+                    </button>
+                    {!hasFallback && (
+                      <button
+                        type="button"
+                        className="hs-btn-add"
+                        title="Insert the required `*` catch-all row"
+                        onClick={() => {
+                          const next = splitClientsData.map((x, j) =>
+                            j === si ? { ...x, entries: [...x.entries, { percent: '*', value: '""' }] } : x
+                          )
+                          updateSplitClientsBlocks(next)
+                        }}
+                      >
+                        + Add <code>*</code> fallback
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+        {!readOnly && (
+          <button
+            type="button"
+            className="hs-btn-add"
+            onClick={() =>
+              updateSplitClientsBlocks([
+                ...splitClientsData,
+                {
+                  id: `split-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                  sourceKey: '"${remote_addr}AAA"',
+                  resultVar: '$variant',
+                  entries: [
+                    { percent: '5%', value: '"v1"' },
+                    { percent: '*', value: '"v0"' },
+                  ],
+                },
+              ])
+            }
+          >
+            + Add split_clients
           </button>
         )}
       </CollapsibleSection>
@@ -1604,24 +2361,31 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
         </div>
       </CollapsibleSection>
 
-      {/* ── F5.3 Geo / GeoIP ──────────────────────────────────────────────── */}
+      {/* ── F5.3 / §49.1 Geo / GeoIP ──────────────────────────────────────── */}
       <CollapsibleSection
         id="geo"
         title="Geo / GeoIP"
-        info="`geo { }` maps IP/CIDR ranges to variables (pure config, no external data). `geoip2 { }` (ngx_http_geoip2_module) maps IPs to country/city using a MaxMind DB. Use the resulting variables in access rules, log formats, or routing maps."
+        info={'`geo [$source] $result { 10.0.0.0/8 1; 192.168.0.0/16 1; default 0; }` resolves a client IP (or any variable) into a value — useful for marking trusted networks, per-region routing, or feeding a `limit_req` key. `ranges` switches from CIDR to explicit IP ranges (10.0.0.1-10.0.0.255). Source defaults to `$remote_addr` when omitted; override to e.g. `$http_x_forwarded_for` when behind a trusted proxy. `geoip2 { }` (ngx_http_geoip2_module) binds MaxMind DB fields to variables for country/city lookups. Variables defined here show up in the "Defined Variables" panel at the top of this tab.'}
         open={openSections.has('geo')}
         onToggle={() => toggleSection('geo')}
       >
         <div className="hs-map-list">
-          <h4 className="hs-sub-heading">geo &#123;&#125; blocks</h4>
-          {geoBlocksData.map((geo, gi) => (
+          <h4 className="hs-sub-heading">
+            geo &#123;&#125; blocks
+            <InfoIcon text="Each block binds one result variable. Source is optional and defaults to $remote_addr. Pattern lookups happen at request time (cheap — tree-walking, not regex). `default` is the fallback when no pattern matches; leave blank to get an empty string." />
+          </h4>
+          {geoBlocksData.map((geo, gi) => {
+            const dupResult = geo.resultVar && variableCounts[geo.resultVar] > 1
+            return (
             <div key={geo.id ?? gi} className="hs-map-card">
               <div className="hs-map-header">
                 <div className="hs-map-vars">
                   <input
                     type="text"
                     className="hs-map-var"
-                    placeholder="$source (optional)"
+                    placeholder="$remote_addr (default)"
+                    list="hs-defined-vars"
+                    title="Source variable. Defaults to $remote_addr when omitted. Use $http_x_forwarded_for when nginx is behind a trusted proxy."
                     value={geo.sourceVar}
                     onChange={(e) => {
                       const next = geoBlocksData.map((g, j) => j === gi ? { ...g, sourceVar: e.target.value } : g)
@@ -1633,7 +2397,8 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
                   <input
                     type="text"
                     className="hs-map-var"
-                    placeholder="$result"
+                    placeholder="$country_code"
+                    title="Result variable — the variable this geo block defines. Reference it elsewhere in access rules, limit_req keys, log formats, etc."
                     value={geo.resultVar}
                     onChange={(e) => {
                       const next = geoBlocksData.map((g, j) => j === gi ? { ...g, resultVar: e.target.value } : g)
@@ -1650,8 +2415,13 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
                   >×</button>
                 )}
               </div>
+              {dupResult && (
+                <div className="hs-warn hs-var-collision">
+                  ⚠ <code>{geo.resultVar}</code> is already defined by another block — nginx will reject the config with "duplicate variable" on reload.
+                </div>
+              )}
               <div className="hs-map-flags">
-                <label className="checkbox-label">
+                <label className="checkbox-label" title="Switch from CIDR to IP-range notation (10.0.0.1-10.0.0.255). All entries in this block must match the chosen format.">
                   <input
                     type="checkbox"
                     checked={geo.ranges}
@@ -1663,7 +2433,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
                   />
                   ranges
                 </label>
-                <span className="hs-map-label">default</span>
+                <span className="hs-map-label" title="Value returned when no entry matches. Leave blank for empty string.">default</span>
                 <input
                   type="text"
                   className="hs-map-default"
@@ -1681,7 +2451,7 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
                   <div key={ei} className="hs-map-entry">
                     <input
                       type="text"
-                      placeholder="CIDR or IP"
+                      placeholder={geo.ranges ? '10.0.0.1-10.0.0.255' : 'CIDR (e.g. 10.0.0.0/8)'}
                       value={entry.cidr}
                       onChange={(e) => {
                         const next = geoBlocksData.map((g, j) => j === gi ? {
@@ -1720,27 +2490,48 @@ export default function HttpSettingsTab({ httpBlock, onUpdate, readOnly }: Props
                   </div>
                 ))}
                 {!readOnly && (
-                  <button
-                    type="button"
-                    className="hs-btn-add-entry"
-                    onClick={() => {
-                      const next = geoBlocksData.map((g, j) => j === gi ? {
-                        ...g, entries: [...g.entries, { cidr: '', value: '' }]
-                      } : g)
-                      updateGeoBlocks(next)
-                    }}
-                  >+ Add entry</button>
+                  <div className="hs-split-actions">
+                    <button
+                      type="button"
+                      className="hs-btn-add-entry"
+                      onClick={() => {
+                        const next = geoBlocksData.map((g, j) => j === gi ? {
+                          ...g, entries: [...g.entries, { cidr: '', value: '' }]
+                        } : g)
+                        updateGeoBlocks(next)
+                      }}
+                    >+ Add entry</button>
+                    <button
+                      type="button"
+                      className="hs-btn-add-entry"
+                      title="Seeds the RFC1918 private ranges + loopback with value=1. Idempotent — rows already present are skipped."
+                      onClick={() => {
+                        const privateRanges: Array<{ cidr: string; value: string }> = [
+                          { cidr: '127.0.0.0/8', value: '1' },
+                          { cidr: '10.0.0.0/8', value: '1' },
+                          { cidr: '172.16.0.0/12', value: '1' },
+                          { cidr: '192.168.0.0/16', value: '1' },
+                        ]
+                        const existing = new Set(geo.entries.map((e) => e.cidr))
+                        const toAdd = privateRanges.filter((r) => !existing.has(r.cidr))
+                        const next = geoBlocksData.map((g, j) => j === gi ? {
+                          ...g, entries: [...g.entries, ...toAdd],
+                        } : g)
+                        updateGeoBlocks(next)
+                      }}
+                    >+ Private networks</button>
+                  </div>
                 )}
               </div>
             </div>
-          ))}
+          )})}
           {!readOnly && (
             <button
               type="button"
               className="hs-btn-add-map"
               onClick={() => updateGeoBlocks([
                 ...geoBlocksData,
-                { sourceVar: '', resultVar: '$geo_var', ranges: false, defaultVal: '0', entries: [] },
+                { sourceVar: '$remote_addr', resultVar: '$geo_var', ranges: false, defaultVal: '0', entries: [] },
               ])}
             >+ Add geo block</button>
           )}

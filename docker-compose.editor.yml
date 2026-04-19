@@ -1,0 +1,27 @@
+# Editor-only mode — runs just the admin UI. No nginx process is started; the
+# Reload button is disabled (shows an explanatory message), but Test Syntax
+# still works because the nginx binary is bundled in the image.
+#
+# Use this when you want a scratchpad for authoring nginx configs and copying
+# or downloading them out. Auth is disabled by default — override AUTH_DISABLED
+# and supply AUTH_USERNAME / AUTH_PASSWORD_HASH if you expose the port.
+#
+#   docker compose -f docker-compose.editor.yml up --build
+#   → http://localhost:8081
+
+services:
+  nginx-config-ui-editor:
+    build:
+      context: .
+      target: editor
+    image: nginx-config-ui:editor
+    container_name: nginx-config-ui-editor
+    ports:
+      - "8081:8081"
+    environment:
+      # Baked into the image but listed here so it's obvious how to flip.
+      NGINX_RELOAD_MODE: disabled
+      AUTH_DISABLED: "${AUTH_DISABLED:-1}"
+      AUTH_USERNAME: "${AUTH_USERNAME:-}"
+      AUTH_PASSWORD_HASH: "${AUTH_PASSWORD_HASH:-}"
+    restart: unless-stopped

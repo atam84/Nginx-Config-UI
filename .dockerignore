@@ -1,0 +1,27 @@
+# Build outputs and caches — the Dockerfile runs its own builds.
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# Local state the image never needs.
+.git
+.github
+.idea
+.vscode
+*.log
+img/
+docs/
+config-samples/
+
+# Pre-built local binaries (we build fresh inside the image).
+nginx-config-ui
+
+# Developer scratch.
+.claude/
+.env
+.env.*
+!.env.example
+
+# OS cruft
+.DS_Store
+Thumbs.db

@@ -1,0 +1,42 @@
+# All-in-one mode — admin UI + a real nginx running in the same container, with
+# the admin controlling nginx via `nginx -s reload` (NGINX_RELOAD_MODE=signal).
+# Great for demos, home labs, and any "one box" deployment where you want a
+# GUI to manage nginx without installing anything on the host.
+#
+#   docker compose -f docker-compose.all-in-one.yml up --build
+#   → http://localhost:8081   (admin UI)
+#   → http://localhost/       (nginx serving whatever you configure)
+#
+# The three named volumes (config, logs, html) get bootstrapped from the
+# nginx:alpine image's defaults on first boot, so nginx -t passes out of the
+# box. Swap any of them for bind mounts if you want to keep configs on the
+# host filesystem.
+
+services:
+  nginx-config-ui:
+    build:
+      context: .
+      target: all-in-one
+    image: nginx-config-ui:all-in-one
+    container_name: nginx-config-ui
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8081:8081"
+    environment:
+      # Baked into the image but listed here for clarity.
+      NGINX_RELOAD_MODE: signal
+      NGINX_CONFIG_ROOT: /etc/nginx
+      AUTH_DISABLED: "${AUTH_DISABLED:-1}"
+      AUTH_USERNAME: "${AUTH_USERNAME:-}"
+      AUTH_PASSWORD_HASH: "${AUTH_PASSWORD_HASH:-}"
+    volumes:
+      - nginx-config:/etc/nginx
+      - nginx-logs:/var/log/nginx
+      - nginx-html:/usr/share/nginx/html
+    restart: unless-stopped
+
+volumes:
+  nginx-config:
+  nginx-logs:
+  nginx-html:

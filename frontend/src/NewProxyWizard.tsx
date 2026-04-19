@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { type ConfigFile, type Node } from './api'
 import './NewProxyWizard.css'
 
@@ -11,7 +11,7 @@ interface Props {
   onClose: () => void
 }
 
-type Template = 'proxy' | 'php' | 'uwsgi'
+type Template = 'proxy' | 'php' | 'uwsgi' | 'grpc' | 'static' | 'spa' | 'node' | 'asgi' | 'go'
 
 /** True if destination looks like an upstream name (simple identifier, not URL/hostname) */
 function looksLikeUpstreamName(dest: string): boolean {
@@ -49,6 +49,36 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
   const [uwsgiStaticRoot, setUwsgiStaticRoot] = useState('/var/www/app/static/')
   const [uwsgiServeStatic, setUwsgiServeStatic] = useState(true)
   const [uwsgiReadTimeout, setUwsgiReadTimeout] = useState('300s')
+  // §44.3 — gRPC template state
+  const [grpcBackend, setGrpcBackend] = useState('grpc://127.0.0.1:50051')
+  const [grpcSslServerName, setGrpcSslServerName] = useState('')
+  const [grpcSslVerify, setGrpcSslVerify] = useState(false)
+  const [grpcReadTimeout, setGrpcReadTimeout] = useState('600s')
+  // §45.6 — Static site template state
+  const [staticRoot, setStaticRoot] = useState('/var/www/html')
+  const [staticIndex, setStaticIndex] = useState('index.html index.htm')
+  const [staticSpaFallback, setStaticSpaFallback] = useState(true)
+  const [staticLongCache, setStaticLongCache] = useState(true)
+  const [staticAssetsPrefix, setStaticAssetsPrefix] = useState('/assets/')
+  // §45.7 — SPA (SSR + static) template state
+  const [spaSsrBackend, setSpaSsrBackend] = useState('http://127.0.0.1:3000')
+  const [spaStaticPrefix, setSpaStaticPrefix] = useState('/_next/static/')
+  const [spaStaticRoot, setSpaStaticRoot] = useState('/var/www/app/.next/static/')
+  const [spaPublicPrefix, setSpaPublicPrefix] = useState('/public/')
+  const [spaPublicRoot, setSpaPublicRoot] = useState('/var/www/app/public/')
+  const [spaIncludePublic, setSpaIncludePublic] = useState(true)
+  // §46.1 — Node.js (Next.js / Nuxt / Remix) template state
+  const [nodeBackend, setNodeBackend] = useState('http://127.0.0.1:3000')
+  const [nodeIncludeStatic, setNodeIncludeStatic] = useState(true)
+  const [nodeStaticPrefix, setNodeStaticPrefix] = useState('/_next/static/')
+  const [nodeStaticRoot, setNodeStaticRoot] = useState('/var/www/app/.next/static/')
+  const [nodeReadTimeout, setNodeReadTimeout] = useState('3600s')
+  // §46.2 — Python ASGI (FastAPI / Django Channels / Starlette) template state
+  const [asgiBackend, setAsgiBackend] = useState('http://127.0.0.1:8000')
+  const [asgiReadTimeout, setAsgiReadTimeout] = useState('300s')
+  // §46.3 — Go / generic HTTP service template state
+  const [goBackend, setGoBackend] = useState('http://127.0.0.1:8080')
+  const [goReadTimeout, setGoReadTimeout] = useState('60s')
 
   const portNum = ssl ? (port || '443') : (port || '80')
 
@@ -231,11 +261,375 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
     return server
   }
 
+  const buildGrpcServer = (): Node => {
+    // gRPC requires HTTP/2 — always emit the flag regardless of the SSL/http2
+    // wizard toggles so the generated config works out of the box.
+    const listenParts = [portNum]
+    if (ssl) listenParts.push('ssl')
+    listenParts.push('http2')
+    const server: Node = {
+      type: 'block',
+      name: 'server',
+      args: [],
+      enabled: true,
+      id: nid('server'),
+      directives: [
+        { type: 'directive', name: 'listen', args: [listenParts.join(' ')], enabled: true },
+      ],
+    }
+    const sn = serverNameNode()
+    if (sn) server.directives!.push(sn)
+
+    const backend = (grpcBackend || 'grpc://127.0.0.1:50051').trim()
+    const usesTLS = backend.startsWith('grpcs://')
+    const readT = (grpcReadTimeout || '600s').trim()
+
+    const locDirs: Node[] = [
+      { type: 'directive', name: 'grpc_pass', args: [backend], enabled: true },
+      { type: 'directive', name: 'grpc_set_header', args: ['Host', '$host'], enabled: true },
+      { type: 'directive', name: 'grpc_set_header', args: ['X-Real-IP', '$remote_addr'], enabled: true },
+      { type: 'directive', name: 'grpc_read_timeout', args: [readT], enabled: true },
+      { type: 'directive', name: 'grpc_send_timeout', args: [readT], enabled: true },
+      { type: 'directive', name: 'client_max_body_size', args: ['0'], enabled: true },
+    ]
+    if (usesTLS) {
+      if (grpcSslServerName.trim()) {
+        locDirs.push({ type: 'directive', name: 'grpc_ssl_server_name', args: [grpcSslServerName.trim()], enabled: true })
+      }
+      locDirs.push({
+        type: 'directive',
+        name: 'grpc_ssl_verify',
+        args: [grpcSslVerify ? 'on' : 'off'],
+        enabled: true,
+      })
+      if (grpcSslVerify) {
+        locDirs.push({
+          type: 'directive',
+          name: 'grpc_ssl_trusted_certificate',
+          args: ['/etc/ssl/certs/ca-certificates.crt'],
+          enabled: true,
+        })
+      }
+    }
+
+    server.directives!.push({
+      type: 'block',
+      name: 'location',
+      args: ['/'],
+      enabled: true,
+      id: nid('location'),
+      directives: locDirs,
+    })
+
+    return server
+  }
+
+  const buildStaticServer = (): Node => {
+    const server: Node = {
+      type: 'block',
+      name: 'server',
+      args: [],
+      enabled: true,
+      id: nid('server'),
+      directives: [
+        { type: 'directive', name: 'listen', args: [listenArg()], enabled: true },
+      ],
+    }
+    const sn = serverNameNode()
+    if (sn) server.directives!.push(sn)
+
+    server.directives!.push({ type: 'directive', name: 'root', args: [staticRoot || '/var/www/html'], enabled: true })
+    server.directives!.push({
+      type: 'directive',
+      name: 'index',
+      args: (staticIndex || 'index.html').split(/\s+/).filter(Boolean),
+      enabled: true,
+    })
+
+    // Optional long-cache block for /assets/ (or whatever prefix the user chose).
+    if (staticLongCache && staticAssetsPrefix.trim()) {
+      const prefix = staticAssetsPrefix.trim()
+      server.directives!.push({
+        type: 'block',
+        name: 'location',
+        args: [prefix],
+        enabled: true,
+        id: nid('location'),
+        directives: [
+          { type: 'directive', name: 'expires', args: ['1y'], enabled: true },
+          { type: 'directive', name: 'add_header', args: ['Cache-Control', '"public, max-age=31536000, immutable"', 'always'], enabled: true },
+          { type: 'directive', name: 'access_log', args: ['off'], enabled: true },
+        ],
+      })
+    }
+
+    // Main location: try_files with optional SPA fallback to /index.html.
+    const indexFirst = (staticIndex || 'index.html').split(/\s+/).filter(Boolean)[0] || 'index.html'
+    const fallback = staticSpaFallback ? `/${indexFirst.replace(/^\/+/, '')}` : '=404'
+    server.directives!.push({
+      type: 'block',
+      name: 'location',
+      args: ['/'],
+      enabled: true,
+      id: nid('location'),
+      directives: [
+        { type: 'directive', name: 'try_files', args: ['$uri', '$uri/', fallback], enabled: true },
+      ],
+    })
+
+    // Deny dotfiles (common static-site hardening).
+    server.directives!.push({
+      type: 'block',
+      name: 'location',
+      args: ['~', '/\\.(?!well-known).*'],
+      enabled: true,
+      id: nid('location'),
+      directives: [
+        { type: 'directive', name: 'deny', args: ['all'], enabled: true },
+      ],
+    })
+
+    return server
+  }
+
+  const buildSpaServer = (): Node => {
+    const server: Node = {
+      type: 'block',
+      name: 'server',
+      args: [],
+      enabled: true,
+      id: nid('server'),
+      directives: [
+        { type: 'directive', name: 'listen', args: [listenArg()], enabled: true },
+      ],
+    }
+    const sn = serverNameNode()
+    if (sn) server.directives!.push(sn)
+
+    // Static assets served directly from disk, long-cached, access_log off.
+    const staticPrefix = (spaStaticPrefix || '/_next/static/').trim()
+    const staticRootValue = (spaStaticRoot || '/var/www/app/.next/static/').trim()
+    server.directives!.push({
+      type: 'block',
+      name: 'location',
+      args: [staticPrefix],
+      enabled: true,
+      id: nid('location'),
+      directives: [
+        { type: 'directive', name: 'alias', args: [staticRootValue], enabled: true },
+        { type: 'directive', name: 'expires', args: ['1y'], enabled: true },
+        { type: 'directive', name: 'add_header', args: ['Cache-Control', '"public, max-age=31536000, immutable"', 'always'], enabled: true },
+        { type: 'directive', name: 'access_log', args: ['off'], enabled: true },
+        { type: 'directive', name: 'try_files', args: ['$uri', '=404'], enabled: true },
+      ],
+    })
+
+    // Optional /public/ (or configurable) prefix for framework-agnostic static files.
+    if (spaIncludePublic && spaPublicPrefix.trim() && spaPublicRoot.trim()) {
+      server.directives!.push({
+        type: 'block',
+        name: 'location',
+        args: [spaPublicPrefix.trim()],
+        enabled: true,
+        id: nid('location'),
+        directives: [
+          { type: 'directive', name: 'alias', args: [spaPublicRoot.trim()], enabled: true },
+          { type: 'directive', name: 'expires', args: ['30d'], enabled: true },
+          { type: 'directive', name: 'add_header', args: ['Cache-Control', '"public, max-age=2592000"', 'always'], enabled: true },
+          { type: 'directive', name: 'access_log', args: ['off'], enabled: true },
+          { type: 'directive', name: 'try_files', args: ['$uri', '=404'], enabled: true },
+        ],
+      })
+    }
+
+    // Main passthrough to the SSR backend.
+    const backend = (spaSsrBackend || 'http://127.0.0.1:3000').trim()
+    const proxyPassValue = backend.includes('://') ? backend : `http://${backend}`
+    server.directives!.push({
+      type: 'block',
+      name: 'location',
+      args: ['/'],
+      enabled: true,
+      id: nid('location'),
+      directives: [
+        { type: 'directive', name: 'proxy_pass', args: [proxyPassValue], enabled: true },
+        { type: 'directive', name: 'proxy_http_version', args: ['1.1'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['Host', '$host'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Real-IP', '$remote_addr'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Forwarded-For', '$proxy_add_x_forwarded_for'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Forwarded-Proto', '$scheme'], enabled: true },
+        // WebSocket / HMR support — harmless when not used, required for Next.js dev and most SSR frameworks.
+        { type: 'directive', name: 'proxy_set_header', args: ['Upgrade', '$http_upgrade'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['Connection', '"upgrade"'], enabled: true },
+        { type: 'directive', name: 'proxy_read_timeout', args: ['60s'], enabled: true },
+      ],
+    })
+
+    return server
+  }
+
+  const buildNodeServer = (): Node => {
+    const server: Node = {
+      type: 'block',
+      name: 'server',
+      args: [],
+      enabled: true,
+      id: nid('server'),
+      directives: [
+        { type: 'directive', name: 'listen', args: [listenArg()], enabled: true },
+      ],
+    }
+    const sn = serverNameNode()
+    if (sn) server.directives!.push(sn)
+
+    // Optional /_next/static (or equivalent) pass-through served from disk.
+    if (nodeIncludeStatic && nodeStaticPrefix.trim() && nodeStaticRoot.trim()) {
+      server.directives!.push({
+        type: 'block',
+        name: 'location',
+        args: [nodeStaticPrefix.trim()],
+        enabled: true,
+        id: nid('location'),
+        directives: [
+          { type: 'directive', name: 'alias', args: [nodeStaticRoot.trim()], enabled: true },
+          { type: 'directive', name: 'expires', args: ['1y'], enabled: true },
+          { type: 'directive', name: 'add_header', args: ['Cache-Control', '"public, max-age=31536000, immutable"', 'always'], enabled: true },
+          { type: 'directive', name: 'access_log', args: ['off'], enabled: true },
+          { type: 'directive', name: 'try_files', args: ['$uri', '=404'], enabled: true },
+        ],
+      })
+    }
+
+    const backend = (nodeBackend || 'http://127.0.0.1:3000').trim()
+    const proxyPassValue = backend.includes('://') ? backend : `http://${backend}`
+    const readT = (nodeReadTimeout || '3600s').trim()
+    server.directives!.push({
+      type: 'block',
+      name: 'location',
+      args: ['/'],
+      enabled: true,
+      id: nid('location'),
+      directives: [
+        { type: 'directive', name: 'proxy_pass', args: [proxyPassValue], enabled: true },
+        { type: 'directive', name: 'proxy_http_version', args: ['1.1'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['Host', '$host'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Real-IP', '$remote_addr'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Forwarded-For', '$proxy_add_x_forwarded_for'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Forwarded-Proto', '$scheme'], enabled: true },
+        // WebSocket / HMR — required for Next.js dev server and HMR over WS.
+        { type: 'directive', name: 'proxy_set_header', args: ['Upgrade', '$http_upgrade'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['Connection', '"upgrade"'], enabled: true },
+        { type: 'directive', name: 'proxy_read_timeout', args: [readT], enabled: true },
+        { type: 'directive', name: 'proxy_send_timeout', args: [readT], enabled: true },
+        // Streaming responses (SSE, RSC) break when nginx buffers.
+        { type: 'directive', name: 'proxy_buffering', args: ['off'], enabled: true },
+      ],
+    })
+
+    return server
+  }
+
+  const buildAsgiServer = (): Node => {
+    const server: Node = {
+      type: 'block',
+      name: 'server',
+      args: [],
+      enabled: true,
+      id: nid('server'),
+      directives: [
+        { type: 'directive', name: 'listen', args: [listenArg()], enabled: true },
+      ],
+    }
+    const sn = serverNameNode()
+    if (sn) server.directives!.push(sn)
+
+    const backend = (asgiBackend || 'http://127.0.0.1:8000').trim()
+    const proxyPassValue = backend.includes('://') ? backend : `http://${backend}`
+    const readT = (asgiReadTimeout || '300s').trim()
+    server.directives!.push({
+      type: 'block',
+      name: 'location',
+      args: ['/'],
+      enabled: true,
+      id: nid('location'),
+      directives: [
+        { type: 'directive', name: 'proxy_pass', args: [proxyPassValue], enabled: true },
+        { type: 'directive', name: 'proxy_http_version', args: ['1.1'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['Host', '$host'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Real-IP', '$remote_addr'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Forwarded-For', '$proxy_add_x_forwarded_for'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Forwarded-Proto', '$scheme'], enabled: true },
+        // WebSocket support — FastAPI WebSockets, Django Channels, Starlette.
+        { type: 'directive', name: 'proxy_set_header', args: ['Upgrade', '$http_upgrade'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['Connection', '"upgrade"'], enabled: true },
+        { type: 'directive', name: 'proxy_read_timeout', args: [readT], enabled: true },
+        { type: 'directive', name: 'proxy_send_timeout', args: [readT], enabled: true },
+        // ASGI apps often stream (StreamingResponse, SSE) — disable buffering.
+        { type: 'directive', name: 'proxy_buffering', args: ['off'], enabled: true },
+        { type: 'directive', name: 'client_max_body_size', args: ['25m'], enabled: true },
+      ],
+    })
+
+    return server
+  }
+
+  const buildGoServer = (): Node => {
+    const server: Node = {
+      type: 'block',
+      name: 'server',
+      args: [],
+      enabled: true,
+      id: nid('server'),
+      directives: [
+        { type: 'directive', name: 'listen', args: [listenArg()], enabled: true },
+      ],
+    }
+    const sn = serverNameNode()
+    if (sn) server.directives!.push(sn)
+
+    const backend = (goBackend || 'http://127.0.0.1:8080').trim()
+    const proxyPassValue = backend.includes('://') ? backend : `http://${backend}`
+    const readT = (goReadTimeout || '60s').trim()
+    server.directives!.push({
+      type: 'block',
+      name: 'location',
+      args: ['/'],
+      enabled: true,
+      id: nid('location'),
+      directives: [
+        { type: 'directive', name: 'proxy_pass', args: [proxyPassValue], enabled: true },
+        { type: 'directive', name: 'proxy_http_version', args: ['1.1'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['Host', '$host'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Real-IP', '$remote_addr'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Forwarded-For', '$proxy_add_x_forwarded_for'], enabled: true },
+        { type: 'directive', name: 'proxy_set_header', args: ['X-Forwarded-Proto', '$scheme'], enabled: true },
+        { type: 'directive', name: 'proxy_connect_timeout', args: ['5s'], enabled: true },
+        { type: 'directive', name: 'proxy_read_timeout', args: [readT], enabled: true },
+        { type: 'directive', name: 'proxy_send_timeout', args: [readT], enabled: true },
+      ],
+    })
+
+    return server
+  }
+
   const buildServer = (): Node => {
     if (template === 'php') return buildPhpServer()
     if (template === 'uwsgi') return buildUwsgiServer()
+    if (template === 'grpc') return buildGrpcServer()
+    if (template === 'static') return buildStaticServer()
+    if (template === 'spa') return buildSpaServer()
+    if (template === 'node') return buildNodeServer()
+    if (template === 'asgi') return buildAsgiServer()
+    if (template === 'go') return buildGoServer()
     return buildProxyServer()
   }
+
+  // gRPC requires HTTP/2 — force the wizard's http2 toggle on when gRPC is
+  // selected and switch the default listen port to 443 if the user hasn't
+  // touched it (most gRPC deployments use TLS on 443).
+  useEffect(() => {
+    if (template === 'grpc') setHttp2(true)
+  }, [template])
 
   const handleFinish = () => {
     const server = buildServer()
@@ -252,6 +646,16 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
   }
 
   const totalSteps = template === 'proxy' ? 4 : 3
+  const step2Label =
+    template === 'php' ? 'PHP Backend' :
+    template === 'uwsgi' ? 'uWSGI Backend' :
+    template === 'grpc' ? 'gRPC Backend' :
+    template === 'static' ? 'Webroot' :
+    template === 'spa' ? 'SSR Backend + Static' :
+    template === 'node' ? 'Node Backend' :
+    template === 'asgi' ? 'ASGI Backend' :
+    template === 'go' ? 'Service Backend' :
+    'Destination'
 
   return (
     <div className="wizard-overlay" onClick={onClose}>
@@ -265,7 +669,7 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
         <div className="wizard-steps">
           <span className={step >= 1 ? 'active' : ''}>1. Template &amp; Domain</span>
           <span className={step >= 2 ? 'active' : ''}>
-            2. {template === 'php' ? 'PHP Backend' : template === 'uwsgi' ? 'uWSGI Backend' : 'Destination'}
+            2. {step2Label}
           </span>
           <span className={step >= 3 ? 'active' : ''}>3. SSL</span>
           {template === 'proxy' && (
@@ -300,6 +704,54 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
                 >
                   <div className="wizard-template-name">Python / uWSGI</div>
                   <div className="wizard-template-desc">Dispatch to a uWSGI backend (Django, Flask) + optional <code>/static/</code> alias</div>
+                </button>
+                <button
+                  type="button"
+                  className={`wizard-template-card${template === 'grpc' ? ' active' : ''}`}
+                  onClick={() => setTemplate('grpc')}
+                >
+                  <div className="wizard-template-name">gRPC service</div>
+                  <div className="wizard-template-desc">HTTP/2 passthrough via <code>grpc_pass</code> (auto-enables <code>http2</code> on listen)</div>
+                </button>
+                <button
+                  type="button"
+                  className={`wizard-template-card${template === 'static' ? ' active' : ''}`}
+                  onClick={() => setTemplate('static')}
+                >
+                  <div className="wizard-template-name">Static site</div>
+                  <div className="wizard-template-desc">Serve a webroot with <code>try_files</code> + optional SPA fallback to <code>/index.html</code></div>
+                </button>
+                <button
+                  type="button"
+                  className={`wizard-template-card${template === 'spa' ? ' active' : ''}`}
+                  onClick={() => setTemplate('spa')}
+                >
+                  <div className="wizard-template-name">SPA (SSR + static)</div>
+                  <div className="wizard-template-desc">SSR backend via <code>proxy_pass</code> + static-asset prefix served from disk with long-cache</div>
+                </button>
+                <button
+                  type="button"
+                  className={`wizard-template-card${template === 'node' ? ' active' : ''}`}
+                  onClick={() => setTemplate('node')}
+                >
+                  <div className="wizard-template-name">Node.js (Next/Nuxt/Remix)</div>
+                  <div className="wizard-template-desc">Proxy + WebSocket upgrade + <code>/_next/static</code> pass-through with HMR-safe timeouts</div>
+                </button>
+                <button
+                  type="button"
+                  className={`wizard-template-card${template === 'asgi' ? ' active' : ''}`}
+                  onClick={() => setTemplate('asgi')}
+                >
+                  <div className="wizard-template-name">Python ASGI (FastAPI / Channels)</div>
+                  <div className="wizard-template-desc">Proxy + WebSocket upgrade + long <code>proxy_read_timeout</code> for streaming / long-poll</div>
+                </button>
+                <button
+                  type="button"
+                  className={`wizard-template-card${template === 'go' ? ' active' : ''}`}
+                  onClick={() => setTemplate('go')}
+                >
+                  <div className="wizard-template-name">Go / generic HTTP</div>
+                  <div className="wizard-template-desc">Minimal <code>proxy_pass</code> with sensible timeouts — for Go, Rust, or any plain HTTP service</div>
                 </button>
               </div>
               <label>Domain name(s)</label>
@@ -373,6 +825,154 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
               </div>
             </div>
           )}
+          {step === 2 && template === 'grpc' && (
+            <div className="wizard-step">
+              <label>gRPC backend (<code>grpc_pass</code>)</label>
+              <input
+                type="text"
+                value={grpcBackend}
+                onChange={(e) => setGrpcBackend(e.target.value)}
+                placeholder="grpc://127.0.0.1:50051 or grpcs://service.internal:443"
+                spellCheck={false}
+              />
+              <label>grpc_read_timeout / grpc_send_timeout</label>
+              <input
+                type="text"
+                value={grpcReadTimeout}
+                onChange={(e) => setGrpcReadTimeout(e.target.value)}
+                placeholder="600s"
+                spellCheck={false}
+              />
+              {grpcBackend.trim().startsWith('grpcs://') && (
+                <>
+                  <label>grpc_ssl_server_name (SNI)</label>
+                  <input
+                    type="text"
+                    value={grpcSslServerName}
+                    onChange={(e) => setGrpcSslServerName(e.target.value)}
+                    placeholder="service.internal"
+                    spellCheck={false}
+                  />
+                  <label className="wizard-check">
+                    <input type="checkbox" checked={grpcSslVerify} onChange={(e) => setGrpcSslVerify(e.target.checked)} />
+                    Verify backend certificate (<code>grpc_ssl_verify on</code>) — seeds <code>grpc_ssl_trusted_certificate</code> with the system CA bundle
+                  </label>
+                </>
+              )}
+              <div className="wizard-note">
+                <strong>HTTP/2 will be enabled automatically on the listen directive.</strong>
+                {' '}gRPC is HTTP/2-only; without the flag clients get stream errors.
+              </div>
+              <div className="wizard-actions">
+                <button type="button" onClick={() => setStep(1)}>Back</button>
+                <button type="button" onClick={() => setStep(3)}>Next</button>
+              </div>
+            </div>
+          )}
+          {step === 2 && template === 'static' && (
+            <div className="wizard-step">
+              <label>Webroot (<code>root</code>)</label>
+              <input
+                type="text"
+                value={staticRoot}
+                onChange={(e) => setStaticRoot(e.target.value)}
+                placeholder="/var/www/html"
+                spellCheck={false}
+              />
+              <label>Index files (space-separated)</label>
+              <input
+                type="text"
+                value={staticIndex}
+                onChange={(e) => setStaticIndex(e.target.value)}
+                placeholder="index.html index.htm"
+                spellCheck={false}
+              />
+              <label className="wizard-check">
+                <input type="checkbox" checked={staticSpaFallback} onChange={(e) => setStaticSpaFallback(e.target.checked)} />
+                SPA fallback — <code>try_files $uri $uri/ /{(staticIndex || 'index.html').split(/\s+/)[0]}</code> (client-side routing)
+              </label>
+              <label className="wizard-check">
+                <input type="checkbox" checked={staticLongCache} onChange={(e) => setStaticLongCache(e.target.checked)} />
+                Long-cache an asset prefix (<code>expires 1y</code> + <code>Cache-Control: immutable</code>)
+              </label>
+              {staticLongCache && (
+                <>
+                  <label>Asset URL prefix</label>
+                  <input
+                    type="text"
+                    value={staticAssetsPrefix}
+                    onChange={(e) => setStaticAssetsPrefix(e.target.value)}
+                    placeholder="/assets/"
+                    spellCheck={false}
+                  />
+                </>
+              )}
+              <div className="wizard-actions">
+                <button type="button" onClick={() => setStep(1)}>Back</button>
+                <button type="button" onClick={() => setStep(3)}>Next</button>
+              </div>
+            </div>
+          )}
+          {step === 2 && template === 'spa' && (
+            <div className="wizard-step">
+              <label>SSR backend (<code>proxy_pass</code>)</label>
+              <input
+                type="text"
+                value={spaSsrBackend}
+                onChange={(e) => setSpaSsrBackend(e.target.value)}
+                placeholder="http://127.0.0.1:3000"
+                spellCheck={false}
+              />
+              <label>Static asset URL prefix</label>
+              <input
+                type="text"
+                value={spaStaticPrefix}
+                onChange={(e) => setSpaStaticPrefix(e.target.value)}
+                placeholder="/_next/static/"
+                spellCheck={false}
+              />
+              <label>Static asset root on disk (<code>alias</code>)</label>
+              <input
+                type="text"
+                value={spaStaticRoot}
+                onChange={(e) => setSpaStaticRoot(e.target.value)}
+                placeholder="/var/www/app/.next/static/"
+                spellCheck={false}
+              />
+              <label className="wizard-check">
+                <input type="checkbox" checked={spaIncludePublic} onChange={(e) => setSpaIncludePublic(e.target.checked)} />
+                Also serve a <code>/public/</code>-style prefix directly from disk
+              </label>
+              {spaIncludePublic && (
+                <>
+                  <label>Public URL prefix</label>
+                  <input
+                    type="text"
+                    value={spaPublicPrefix}
+                    onChange={(e) => setSpaPublicPrefix(e.target.value)}
+                    placeholder="/public/"
+                    spellCheck={false}
+                  />
+                  <label>Public root on disk (<code>alias</code>)</label>
+                  <input
+                    type="text"
+                    value={spaPublicRoot}
+                    onChange={(e) => setSpaPublicRoot(e.target.value)}
+                    placeholder="/var/www/app/public/"
+                    spellCheck={false}
+                  />
+                </>
+              )}
+              <div className="wizard-note">
+                <strong>Note:</strong> WebSocket upgrade headers are added automatically so Next.js dev / HMR works.
+                Static prefixes are served by nginx directly (bypassing the SSR process) with <code>Cache-Control: immutable</code>.
+              </div>
+              <div className="wizard-actions">
+                <button type="button" onClick={() => setStep(1)}>Back</button>
+                <button type="button" onClick={() => setStep(3)}>Next</button>
+              </div>
+            </div>
+          )}
           {step === 2 && template === 'uwsgi' && (
             <div className="wizard-step">
               <label>uWSGI backend (<code>uwsgi_pass</code>)</label>
@@ -421,6 +1021,114 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
               </div>
             </div>
           )}
+          {step === 2 && template === 'node' && (
+            <div className="wizard-step">
+              <label>Node.js backend (<code>proxy_pass</code>)</label>
+              <input
+                type="text"
+                value={nodeBackend}
+                onChange={(e) => setNodeBackend(e.target.value)}
+                placeholder="http://127.0.0.1:3000"
+                spellCheck={false}
+              />
+              <label>proxy_read_timeout / proxy_send_timeout</label>
+              <input
+                type="text"
+                value={nodeReadTimeout}
+                onChange={(e) => setNodeReadTimeout(e.target.value)}
+                placeholder="3600s (HMR / SSE safe)"
+                spellCheck={false}
+              />
+              <label className="wizard-check">
+                <input type="checkbox" checked={nodeIncludeStatic} onChange={(e) => setNodeIncludeStatic(e.target.checked)} />
+                Serve a static-asset prefix from disk (bypasses Node, <code>expires 1y</code> + <code>immutable</code>)
+              </label>
+              {nodeIncludeStatic && (
+                <>
+                  <label>Static asset URL prefix</label>
+                  <input
+                    type="text"
+                    value={nodeStaticPrefix}
+                    onChange={(e) => setNodeStaticPrefix(e.target.value)}
+                    placeholder="/_next/static/"
+                    spellCheck={false}
+                  />
+                  <label>Static asset root on disk (<code>alias</code>)</label>
+                  <input
+                    type="text"
+                    value={nodeStaticRoot}
+                    onChange={(e) => setNodeStaticRoot(e.target.value)}
+                    placeholder="/var/www/app/.next/static/"
+                    spellCheck={false}
+                  />
+                </>
+              )}
+              <div className="wizard-note">
+                <strong>Note:</strong> WebSocket upgrade headers are added automatically so HMR, React Server Components, and Socket.IO work.
+                <code>proxy_buffering off</code> is emitted so streaming / SSE responses flush immediately.
+              </div>
+              <div className="wizard-actions">
+                <button type="button" onClick={() => setStep(1)}>Back</button>
+                <button type="button" onClick={() => setStep(3)}>Next</button>
+              </div>
+            </div>
+          )}
+          {step === 2 && template === 'asgi' && (
+            <div className="wizard-step">
+              <label>ASGI backend (<code>proxy_pass</code>)</label>
+              <input
+                type="text"
+                value={asgiBackend}
+                onChange={(e) => setAsgiBackend(e.target.value)}
+                placeholder="http://127.0.0.1:8000"
+                spellCheck={false}
+              />
+              <label>proxy_read_timeout / proxy_send_timeout</label>
+              <input
+                type="text"
+                value={asgiReadTimeout}
+                onChange={(e) => setAsgiReadTimeout(e.target.value)}
+                placeholder="300s"
+                spellCheck={false}
+              />
+              <div className="wizard-note">
+                <strong>Note:</strong> WebSocket upgrade headers are added automatically (FastAPI WebSockets, Django Channels, Starlette).
+                <code>proxy_buffering off</code> is emitted so <code>StreamingResponse</code> / SSE endpoints flush immediately.
+              </div>
+              <div className="wizard-actions">
+                <button type="button" onClick={() => setStep(1)}>Back</button>
+                <button type="button" onClick={() => setStep(3)}>Next</button>
+              </div>
+            </div>
+          )}
+          {step === 2 && template === 'go' && (
+            <div className="wizard-step">
+              <label>Service backend (<code>proxy_pass</code>)</label>
+              <input
+                type="text"
+                value={goBackend}
+                onChange={(e) => setGoBackend(e.target.value)}
+                placeholder="http://127.0.0.1:8080"
+                spellCheck={false}
+              />
+              <label>proxy_read_timeout / proxy_send_timeout</label>
+              <input
+                type="text"
+                value={goReadTimeout}
+                onChange={(e) => setGoReadTimeout(e.target.value)}
+                placeholder="60s"
+                spellCheck={false}
+              />
+              <div className="wizard-note">
+                <strong>Minimal template.</strong> Emits <code>proxy_pass</code> + standard forwarding headers + <code>proxy_connect_timeout 5s</code>.
+                Suitable for any plain HTTP service (Go, Rust, Java, .NET). If you need WebSockets, SSE, or long-poll, use the Node.js or Python ASGI template instead.
+              </div>
+              <div className="wizard-actions">
+                <button type="button" onClick={() => setStep(1)}>Back</button>
+                <button type="button" onClick={() => setStep(3)}>Next</button>
+              </div>
+            </div>
+          )}
           {step === 3 && (
             <div className="wizard-step">
               <label>SSL / Port</label>
@@ -448,7 +1156,21 @@ export default function NewProxyWizard({ config: _config, upstreamNames, initial
                   <button type="button" onClick={() => setStep(4)}>Next</button>
                 ) : (
                   <button type="button" className="wizard-finish" onClick={handleFinish}>
-                    {template === 'uwsgi' ? 'Add Python / uWSGI Site' : 'Add PHP Site'}
+                    {template === 'uwsgi'
+                      ? 'Add Python / uWSGI Site'
+                      : template === 'grpc'
+                      ? 'Add gRPC Service'
+                      : template === 'static'
+                      ? 'Add Static Site'
+                      : template === 'spa'
+                      ? 'Add SPA (SSR + Static)'
+                      : template === 'node'
+                      ? 'Add Node.js Site'
+                      : template === 'asgi'
+                      ? 'Add Python ASGI Site'
+                      : template === 'go'
+                      ? 'Add Generic HTTP Service'
+                      : 'Add PHP Site'}
                   </button>
                 )}
               </div>

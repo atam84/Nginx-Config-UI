@@ -8,12 +8,23 @@ import (
 	"strings"
 )
 
-// Config holds paths for nginx and systemctl.
+// Reload-mode values. Chosen by the NGINX_RELOAD_MODE env var so the same
+// binary can run as a systemd-managed service on a VM (default), inside a
+// container where it owns nginx directly via signals, or in editor-only mode
+// where it never touches a running nginx at all.
+const (
+	ReloadModeSystemctl = "systemctl"
+	ReloadModeSignal    = "signal"
+	ReloadModeDisabled  = "disabled"
+)
+
+// Config holds paths for nginx and systemctl plus the reload strategy.
 type Config struct {
-	NginxBin      string // e.g. "nginx"
-	NginxService  string // e.g. "nginx"
-	ConfigRoot    string // e.g. "/etc/nginx"
-	SystemctlBin  string // e.g. "systemctl"
+	NginxBin     string // e.g. "nginx"
+	NginxService string // e.g. "nginx"
+	ConfigRoot   string // e.g. "/etc/nginx"
+	SystemctlBin string // e.g. "systemctl"
+	ReloadMode   string // ReloadModeSystemctl (default) | ReloadModeSignal | ReloadModeDisabled
 }
 
 // DefaultConfig returns config from env or defaults.
@@ -23,6 +34,7 @@ func DefaultConfig() Config {
 		NginxService: "nginx",
 		ConfigRoot:   "/etc/nginx",
 		SystemctlBin: "systemctl",
+		ReloadMode:   ReloadModeSystemctl,
 	}
 	if v := os.Getenv("NGINX_BIN"); v != "" {
 		cfg.NginxBin = v
@@ -35,6 +47,12 @@ func DefaultConfig() Config {
 	}
 	if v := os.Getenv("SYSTEMCTL_BIN"); v != "" {
 		cfg.SystemctlBin = v
+	}
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("NGINX_RELOAD_MODE"))); v != "" {
+		switch v {
+		case ReloadModeSystemctl, ReloadModeSignal, ReloadModeDisabled:
+			cfg.ReloadMode = v
+		}
 	}
 	return cfg
 }
@@ -78,8 +96,17 @@ type ReloadResult struct {
 	Message string
 }
 
-// Reload runs config test first, then systemctl reload nginx.
+// Reload validates the config first, then triggers a reload via whichever
+// mechanism is configured. Editor mode short-circuits with a clear message
+// so the UI can explain why the button did nothing.
 func Reload(cfg Config) ReloadResult {
+	if cfg.ReloadMode == ReloadModeDisabled {
+		return ReloadResult{
+			Success: false,
+			Message: "Reload is disabled in editor-only mode. Download the config or save it to a managed nginx to apply changes.",
+		}
+	}
+
 	test := TestConfig(cfg)
 	if !test.Success {
 		return ReloadResult{
@@ -87,12 +114,22 @@ func Reload(cfg Config) ReloadResult {
 			Message: "Config test failed: " + test.Output,
 		}
 	}
-	cmd := exec.Command(cfg.SystemctlBin, "reload", cfg.NginxService)
+
+	var cmd *exec.Cmd
+	switch cfg.ReloadMode {
+	case ReloadModeSignal:
+		// In-container / self-managed nginx: tell nginx to reload via its own
+		// master-worker signalling (SIGHUP from the nginx binary to the pidfile).
+		cmd = exec.Command(cfg.NginxBin, "-s", "reload")
+	default:
+		// Systemd-managed host nginx.
+		cmd = exec.Command(cfg.SystemctlBin, "reload", cfg.NginxService)
+	}
+
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	err := cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		return ReloadResult{
 			Success: false,
 			Message: fmt.Sprintf("Reload failed: %v %s", err, out.String()),
@@ -110,17 +147,32 @@ type StatusResult struct {
 	Output string // raw output from systemctl is-active
 }
 
-// Status runs `systemctl is-active nginx`.
+// Status checks whether the managed nginx is running. The check mirrors the
+// reload strategy: systemctl in classic VM deploys, pgrep when we signal the
+// binary directly, and a static "unmanaged" response in editor-only mode.
 func Status(cfg Config) StatusResult {
-	cmd := exec.Command(cfg.SystemctlBin, "is-active", cfg.NginxService)
-	out, err := cmd.Output()
-	output := string(out)
-	if err != nil {
-		// Exit code 3 = inactive, others = error
-		return StatusResult{Active: false, Output: strings.TrimSpace(output)}
-	}
-	return StatusResult{
-		Active: strings.TrimSpace(output) == "active",
-		Output: strings.TrimSpace(output),
+	switch cfg.ReloadMode {
+	case ReloadModeDisabled:
+		return StatusResult{Active: false, Output: "unmanaged (editor-only mode)"}
+
+	case ReloadModeSignal:
+		// pgrep -x matches the exact process name; exit 0 = running, 1 = none found.
+		if err := exec.Command("pgrep", "-x", "nginx").Run(); err != nil {
+			return StatusResult{Active: false, Output: "inactive"}
+		}
+		return StatusResult{Active: true, Output: "active"}
+
+	default:
+		cmd := exec.Command(cfg.SystemctlBin, "is-active", cfg.NginxService)
+		out, err := cmd.Output()
+		output := strings.TrimSpace(string(out))
+		if err != nil {
+			// Exit code 3 = inactive, others = error
+			return StatusResult{Active: false, Output: output}
+		}
+		return StatusResult{
+			Active: output == "active",
+			Output: output,
+		}
 	}
 }

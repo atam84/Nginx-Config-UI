@@ -70,6 +70,100 @@ function getKeepalive(up: Node): string {
   return k?.args?.[0] ?? ''
 }
 
+function getZone(up: Node): { name: string; size: string } {
+  const z = up.directives?.find((d) => d.name === 'zone')
+  return { name: z?.args?.[0] ?? '', size: z?.args?.[1] ?? '' }
+}
+
+/**
+ * §54.4 — parse health_check's kw=value arguments. Returns all known fields
+ * plus a `matchName` that references a top-level `match { }` block for
+ * response-body / header assertions. An empty name means no active health
+ * check is configured on this upstream.
+ */
+interface HealthCheckArgs {
+  enabled: boolean
+  interval: string
+  fails: string
+  passes: string
+  uri: string
+  matchName: string
+  port: string
+  type: string // '' (http — default) | 'grpc' | 'udp' | 'tcp' — only http is widely used
+  mandatory: boolean
+  persistent: boolean
+}
+
+function getHealthCheck(up: Node): HealthCheckArgs {
+  const dir = up.directives?.find((d) => d.name === 'health_check')
+  const res: HealthCheckArgs = {
+    enabled: !!dir,
+    interval: '', fails: '', passes: '', uri: '', matchName: '',
+    port: '', type: '', mandatory: false, persistent: false,
+  }
+  if (!dir) return res
+  for (const a of dir.args ?? []) {
+    if (a.startsWith('interval=')) res.interval = a.slice(9)
+    else if (a.startsWith('fails=')) res.fails = a.slice(6)
+    else if (a.startsWith('passes=')) res.passes = a.slice(7)
+    else if (a.startsWith('uri=')) res.uri = a.slice(4)
+    else if (a.startsWith('match=')) res.matchName = a.slice(6)
+    else if (a.startsWith('port=')) res.port = a.slice(5)
+    else if (a.startsWith('type=')) res.type = a.slice(5)
+    else if (a === 'mandatory') res.mandatory = true
+    else if (a === 'persistent') res.persistent = true
+  }
+  return res
+}
+
+function buildHealthCheckArgs(hc: HealthCheckArgs): string[] {
+  if (!hc.enabled) return []
+  const a: string[] = []
+  if (hc.interval) a.push(`interval=${hc.interval}`)
+  if (hc.fails) a.push(`fails=${hc.fails}`)
+  if (hc.passes) a.push(`passes=${hc.passes}`)
+  if (hc.uri) a.push(`uri=${hc.uri}`)
+  if (hc.matchName) a.push(`match=${hc.matchName}`)
+  if (hc.port) a.push(`port=${hc.port}`)
+  if (hc.type) a.push(`type=${hc.type}`)
+  if (hc.mandatory) a.push('mandatory')
+  if (hc.persistent) a.push('persistent')
+  return a
+}
+
+interface MatchBlock {
+  id?: string
+  name: string
+  status: string   // e.g. "200", "200-399", "! 500"
+  bodyPattern: string // body ~ "regex"
+  headers: { name: string; pattern: string }[]
+}
+
+/** Read every match { } block at the http-level (sibling of upstream). */
+function getMatchBlocks(http: Node | undefined): MatchBlock[] {
+  if (!http) return []
+  const out: MatchBlock[] = []
+  for (const d of http.directives ?? []) {
+    if (d.type === 'block' && d.name === 'match') {
+      const name = d.args?.[0] ?? ''
+      const m: MatchBlock = { id: d.id, name, status: '', bodyPattern: '', headers: [] }
+      for (const dd of d.directives ?? []) {
+        if (dd.name === 'status' && dd.args && dd.args.length) m.status = dd.args.join(' ')
+        else if (dd.name === 'body' && dd.args && dd.args.length >= 2 && dd.args[0] === '~') {
+          m.bodyPattern = dd.args.slice(1).join(' ')
+        }
+        else if (dd.name === 'header' && dd.args && dd.args.length) {
+          const parts = dd.args.join(' ').match(/^(\S+)\s*~\s*(.*)$/)
+          if (parts) m.headers.push({ name: parts[1], pattern: parts[2] })
+          else m.headers.push({ name: dd.args[0], pattern: dd.args.slice(1).join(' ') })
+        }
+      }
+      out.push(m)
+    }
+  }
+  return out
+}
+
 interface ServerArgs {
   addr: string
   weight?: string
@@ -220,6 +314,66 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
     updateUpstream(up.id, (u) => ({ ...u, directives: dirs }))
   }
 
+  const setZone = (up: Node, name: string, size: string) => {
+    let dirs = (up.directives ?? []).filter((d) => d.name !== 'zone')
+    if (name) {
+      const args = size ? [name, size] : [name]
+      dirs = [...dirs, { type: 'directive', name: 'zone', args, enabled: true }]
+    }
+    updateUpstream(up.id, (u) => ({ ...u, directives: dirs }))
+  }
+
+  /**
+   * §54.4 — write the health_check directive back to the upstream. An empty
+   * HealthCheckArgs {enabled:false} removes the directive (so a plain round-
+   * trip of a non-Plus config stays bit-for-bit identical).
+   */
+  const setHealthCheck = (up: Node, hc: HealthCheckArgs) => {
+    let dirs = (up.directives ?? []).filter((d) => d.name !== 'health_check')
+    if (hc.enabled) {
+      dirs = [...dirs, { type: 'directive', name: 'health_check', args: buildHealthCheckArgs(hc), enabled: true }]
+    }
+    updateUpstream(up.id, (u) => ({ ...u, directives: dirs }))
+  }
+
+  /**
+   * §54.4 — upsert (or delete) a match { } block at the http level. Name is
+   * the block's single positional arg; pass a blank `body.name` to delete.
+   * Editing the body/headers/status rebuilds the block's directive list
+   * from scratch to avoid surprise re-ordering on re-edit.
+   */
+  const upsertMatchBlock = (m: MatchBlock) => {
+    onUpdate((c) => {
+      const cfg = { ...c, directives: [...(c.directives ?? [])] }
+      const httpIdx = cfg.directives.findIndex((d) => d.name === 'http' && d.type === 'block')
+      if (httpIdx < 0) return cfg
+      const http = { ...cfg.directives[httpIdx], directives: [...(cfg.directives[httpIdx].directives ?? [])] }
+      const idx = http.directives.findIndex((d) => d.type === 'block' && d.name === 'match' && d.args?.[0] === m.name)
+      if (!m.name) {
+        // delete
+        if (idx >= 0) http.directives.splice(idx, 1)
+      } else {
+        const body: Node[] = []
+        if (m.status) body.push({ type: 'directive', name: 'status', args: m.status.split(/\s+/).filter(Boolean), enabled: true })
+        if (m.bodyPattern) body.push({ type: 'directive', name: 'body', args: ['~', m.bodyPattern], enabled: true })
+        for (const h of m.headers) {
+          if (!h.name && !h.pattern) continue
+          const args = h.pattern ? [h.name, '~', h.pattern] : [h.name]
+          body.push({ type: 'directive', name: 'header', args, enabled: true })
+        }
+        const node: Node = {
+          type: 'block', name: 'match', args: [m.name], enabled: true,
+          id: m.id ?? `match-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          directives: body,
+        }
+        if (idx >= 0) http.directives[idx] = node
+        else http.directives.push(node)
+      }
+      cfg.directives[httpIdx] = http
+      return cfg
+    })
+  }
+
   const addServer = (up: Node, addr: string) => {
     if (!addr.trim()) return
     const servers = getServerDirectives(up)
@@ -310,10 +464,17 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
           )}
         </div>
       )}
-      {upstreams.map((up) => {
+      {(() => {
+        const http = config.directives?.find((d) => d.name === 'http' && d.type === 'block')
+        const matchBlocks = getMatchBlocks(http)
+        const matchNames = matchBlocks.map((m) => m.name).filter(Boolean)
+        return upstreams.map((up) => {
         const servers = getServerDirectives(up)
         const algo = getAlgo(up)
         const keepalive = getKeepalive(up)
+        const zone = getZone(up)
+        const hc = getHealthCheck(up)
+        const matchForThis = matchBlocks.find((m) => m.name === hc.matchName)
         const name = up.args?.[0] ?? 'unnamed'
         const linkedProxyHosts = servers.filter((s) => linksUpstream(s, name))
 
@@ -452,6 +613,33 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
 
             <div className="upstream-field">
               <label>
+                zone (status + shared state)
+                <span className="nginx-plus-badge" title="Nginx Plus required for per-server live stats; open-source nginx supports the directive for zone_sync / dynamic config but ignores the stats side.">Nginx Plus</span>
+                <InfoIcon text={'Declares a shared-memory zone that holds runtime state for this upstream: per-server stats (requests, active conns, response counts) visible via the Plus /api & dashboard, plus state for dynamic reconfiguration APIs and zone_sync clustering. Size: 64k is enough for ~128 servers of state; rule of thumb is ~256 bytes per server. Open-source nginx parses the directive (no error) but does not expose the stats. Name it after the upstream (e.g. `backend 64k`). Required before you can use health_check, sticky, or the /api PATCH endpoints on this upstream.'} />
+              </label>
+              <div className="zone-row">
+                <input
+                  type="text"
+                  value={zone.name}
+                  onChange={(e) => setZone(up, e.target.value, zone.size)}
+                  placeholder="zone name (e.g. backend)"
+                  readOnly={readOnly}
+                  title="Shared-memory zone name — usually matches the upstream name"
+                />
+                <input
+                  type="text"
+                  className="zone-size-input"
+                  value={zone.size}
+                  onChange={(e) => setZone(up, zone.name, e.target.value)}
+                  placeholder="64k"
+                  readOnly={readOnly}
+                  title="Zone size — 64k fits ~128 servers (~256 bytes each). Required when a name is set."
+                />
+              </div>
+            </div>
+
+            <div className="upstream-field">
+              <label>
                 keepalive
                 <InfoIcon text={'Max idle connections to each upstream server that each worker keeps open. Reusing TCP/TLS connections drastically reduces latency and CPU. Start at 16–32 per server. Requires `proxy_http_version 1.1` and `proxy_set_header Connection ""` in the location block.'} />
               </label>
@@ -463,6 +651,276 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
                 placeholder="0"
                 readOnly={readOnly}
               />
+            </div>
+
+            {/* §54.4 — Active health check (Nginx Plus) */}
+            <div className="upstream-health-check-section">
+              <div className="uhc-head">
+                <label className="toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={hc.enabled}
+                    disabled={readOnly}
+                    onChange={(e) => setHealthCheck(up, { ...hc, enabled: e.target.checked })}
+                  />
+                  Active health_check
+                </label>
+                <span className="nginx-plus-badge" title={'Requires Nginx Plus — open-source nginx fails nginx -t with \'unknown directive "health_check"\' if this is set.'}>Nginx Plus</span>
+                <InfoIcon text={'Nginx Plus only: proactive health checks run independently of client requests. Each worker sends a probe on the configured interval to every upstream server; failing the probe N times in a row (`fails=N`) marks the server unhealthy (no traffic), and passing M times (`passes=M`) re-adds it. Requires `zone` to be set on this upstream (shared state). Open-source nginx only supports PASSIVE checks (server-level `max_fails` / `fail_timeout`). Typical probe: `health_check interval=5s fails=3 passes=2 uri=/healthz`.'} />
+              </div>
+              {hc.enabled && (
+                <>
+                  <div className="uhc-row">
+                    <label>
+                      interval
+                      <InfoIcon text="How often to probe each upstream server. Time units: s/m/h. Shorter intervals detect failures faster but add load. Default 5s." />
+                    </label>
+                    <input
+                      type="text"
+                      className="uhc-short"
+                      value={hc.interval}
+                      placeholder="5s"
+                      readOnly={readOnly}
+                      onChange={(e) => setHealthCheck(up, { ...hc, interval: e.target.value })}
+                    />
+                    <label>
+                      fails
+                      <InfoIcon text="Consecutive failed probes before a server is marked unhealthy. Default 1 (flaky probes cause flapping — set to 2–3 for stability)." />
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      className="uhc-short"
+                      value={hc.fails}
+                      placeholder="1"
+                      readOnly={readOnly}
+                      onChange={(e) => setHealthCheck(up, { ...hc, fails: e.target.value })}
+                    />
+                    <label>
+                      passes
+                      <InfoIcon text="Consecutive successful probes before an unhealthy server is re-added to rotation. Default 1. Setting 2 avoids flapping after a brief outage." />
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      className="uhc-short"
+                      value={hc.passes}
+                      placeholder="1"
+                      readOnly={readOnly}
+                      onChange={(e) => setHealthCheck(up, { ...hc, passes: e.target.value })}
+                    />
+                    <label>
+                      port
+                      <InfoIcon text="Override probe port (default: the server's port). Useful when your app has a separate health-check port distinct from traffic." />
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      className="uhc-short"
+                      value={hc.port}
+                      placeholder="(server port)"
+                      readOnly={readOnly}
+                      onChange={(e) => setHealthCheck(up, { ...hc, port: e.target.value })}
+                    />
+                  </div>
+                  <div className="uhc-row">
+                    <label>
+                      uri
+                      <InfoIcon text="Path requested by the probe (HTTP health checks only). Typical: /healthz, /health, /ping. The upstream must return a 2xx/3xx status (unless a match block is referenced)." />
+                    </label>
+                    <input
+                      type="text"
+                      className="uhc-wide"
+                      value={hc.uri}
+                      placeholder="/healthz"
+                      readOnly={readOnly}
+                      onChange={(e) => setHealthCheck(up, { ...hc, uri: e.target.value })}
+                    />
+                    <label>
+                      type
+                      <InfoIcon text="Probe protocol. Empty (default) = HTTP. grpc = gRPC health check. tcp/udp = connect-only probe (for stream upstreams)." />
+                    </label>
+                    <select
+                      value={hc.type}
+                      disabled={readOnly}
+                      onChange={(e) => setHealthCheck(up, { ...hc, type: e.target.value })}
+                    >
+                      <option value="">http (default)</option>
+                      <option value="grpc">grpc</option>
+                      <option value="tcp">tcp</option>
+                      <option value="udp">udp</option>
+                    </select>
+                    <label>
+                      match
+                      <InfoIcon text={'Reference a `match { }` block to assert richer conditions than just the HTTP status (e.g. body contains "ok", specific headers). Leave blank to accept any 2xx/3xx.'} />
+                    </label>
+                    <select
+                      value={hc.matchName}
+                      disabled={readOnly}
+                      onChange={(e) => setHealthCheck(up, { ...hc, matchName: e.target.value })}
+                    >
+                      <option value="">(none — any 2xx/3xx)</option>
+                      {matchNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        className="btn-preset"
+                        title="Create a new match { } block at the http level and link this health_check to it."
+                        onClick={() => {
+                          const base = `${name}_healthy`
+                          let nm = base
+                          let i = 2
+                          while (matchNames.includes(nm)) { nm = `${base}_${i++}` }
+                          upsertMatchBlock({ name: nm, status: '200-399', bodyPattern: '', headers: [] })
+                          setHealthCheck(up, { ...hc, matchName: nm })
+                        }}
+                      >
+                        + New match
+                      </button>
+                    )}
+                  </div>
+                  <div className="uhc-row">
+                    <label className="toggle-label" title="When set, the upstream starts in the 'failed' state until the first probe succeeds — requests to this upstream get 502 during startup.">
+                      <input
+                        type="checkbox"
+                        checked={hc.mandatory}
+                        disabled={readOnly}
+                        onChange={(e) => setHealthCheck(up, { ...hc, mandatory: e.target.checked })}
+                      />
+                      mandatory
+                      <InfoIcon text="Start upstream servers in the 'unhealthy' state; they only begin accepting traffic after the first successful probe. Prevents sending requests to servers whose readiness is unverified after a restart/reload. Pairs with `persistent` to retain health state across reloads." />
+                    </label>
+                    <label className="toggle-label" title="Preserve health state across nginx reloads.">
+                      <input
+                        type="checkbox"
+                        checked={hc.persistent}
+                        disabled={readOnly}
+                        onChange={(e) => setHealthCheck(up, { ...hc, persistent: e.target.checked })}
+                      />
+                      persistent
+                      <InfoIcon text="Retain each server's health status (up/down) across `nginx -s reload`. Without this, every reload resets state and all servers start 'healthy' until probed — briefly sending traffic to still-down backends." />
+                    </label>
+                  </div>
+
+                  {hc.matchName && (
+                    <div className="upstream-match-section">
+                      <div className="uhc-subhead">
+                        <strong>match {hc.matchName} {'{ }'}</strong>
+                        <InfoIcon text={'The linked match block. Rules are AND-ed: ALL rules must pass for the upstream to be considered healthy. Empty `status` + empty body + no headers → probe passes on any response (rarely useful; use `status 200` for strict HTTP-200-only).'} />
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            className="btn-preset"
+                            onClick={() => {
+                              // unlink and delete the block if not used elsewhere
+                              const stillUsed = upstreams.some((u) => u.id !== up.id && getHealthCheck(u).matchName === hc.matchName)
+                              setHealthCheck(up, { ...hc, matchName: '' })
+                              if (!stillUsed) upsertMatchBlock({ name: '', status: '', bodyPattern: '', headers: [] } as MatchBlock)
+                            }}
+                            title={`Unlink from this health_check. The match block itself is deleted if not referenced elsewhere.`}
+                          >
+                            Unlink
+                          </button>
+                        )}
+                      </div>
+                      {matchForThis && (
+                        <>
+                          <div className="uhc-row">
+                            <label>
+                              status
+                              <InfoIcon text={'Accepted status codes. Examples: "200" · "200-399" (ranges allowed) · "! 500" (negation — accept anything except 500) · "200 204". Space-separated list.'} />
+                            </label>
+                            <input
+                              type="text"
+                              className="uhc-wide"
+                              value={matchForThis.status}
+                              placeholder="200"
+                              readOnly={readOnly}
+                              onChange={(e) => upsertMatchBlock({ ...matchForThis, status: e.target.value })}
+                            />
+                          </div>
+                          <div className="uhc-row">
+                            <label>
+                              body ~
+                              <InfoIcon text={'PCRE pattern matched against the response body. Typical: `"healthy"` — probe passes only if the body contains that string. Expensive for large bodies (nginx buffers the whole response), so keep health endpoints small.'} />
+                            </label>
+                            <input
+                              type="text"
+                              className="uhc-wide"
+                              value={matchForThis.bodyPattern}
+                              placeholder={'"healthy"'}
+                              readOnly={readOnly}
+                              onChange={(e) => upsertMatchBlock({ ...matchForThis, bodyPattern: e.target.value })}
+                            />
+                          </div>
+                          <div className="uhc-row">
+                            <label>
+                              headers
+                              <InfoIcon text={'Header assertions. Each row is `header-name ~ pattern` (PCRE). Probe passes only if every listed header matches. Use to check e.g. `X-Health ~ "ok"` or `Content-Type ~ "application/json"`.'} />
+                            </label>
+                          </div>
+                          {matchForThis.headers.map((h, hi) => (
+                            <div key={hi} className="uhc-row">
+                              <input
+                                type="text"
+                                className="uhc-short"
+                                placeholder="Header-Name"
+                                value={h.name}
+                                readOnly={readOnly}
+                                onChange={(e) => {
+                                  const next = [...matchForThis.headers]
+                                  next[hi] = { ...h, name: e.target.value }
+                                  upsertMatchBlock({ ...matchForThis, headers: next })
+                                }}
+                              />
+                              <span>~</span>
+                              <input
+                                type="text"
+                                className="uhc-wide"
+                                placeholder='"ok"'
+                                value={h.pattern}
+                                readOnly={readOnly}
+                                onChange={(e) => {
+                                  const next = [...matchForThis.headers]
+                                  next[hi] = { ...h, pattern: e.target.value }
+                                  upsertMatchBlock({ ...matchForThis, headers: next })
+                                }}
+                              />
+                              {!readOnly && (
+                                <button
+                                  type="button"
+                                  className="btn-preset"
+                                  onClick={() => upsertMatchBlock({ ...matchForThis, headers: matchForThis.headers.filter((_, j) => j !== hi) })}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                          {!readOnly && (
+                            <button
+                              type="button"
+                              className="btn-preset"
+                              onClick={() => upsertMatchBlock({ ...matchForThis, headers: [...matchForThis.headers, { name: '', pattern: '' }] })}
+                            >
+                              + Header rule
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {!zone.name && (
+                    <div className="satisfy-orphan-warning" style={{ marginTop: '0.5rem' }}>
+                      <InfoIcon text="health_check requires a shared-memory zone (the `zone` directive above) because probe results are shared across workers via that zone. Add one, otherwise nginx -t will reject the config." />
+                      Missing <code>zone</code> — health_check requires shared-memory zone (above).
+                    </div>
+                  )}
+                </>
+              )}
             </div>
 
             <div className="upstream-links">
@@ -589,7 +1047,10 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
                         />
                         down
                       </label>
-                      <label className="toggle-label" title="resolve">
+                      <label
+                        className="toggle-label"
+                        title={'Re-resolve the server\'s hostname from DNS at runtime (Nginx Plus re-resolves based on TTL; OSS nginx only re-resolves on reload). Requires the address to be a hostname (not IP or unix:) AND a `resolver` directive in scope. Example: `server api.example.com:8080 resolve;` — without the `resolver` at http or server level, nginx -t will reject the config at load.'}
+                      >
                         <input
                           type="checkbox"
                           checked={args.resolve}
@@ -597,6 +1058,13 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
                           onChange={(e) => updateArgs({ resolve: e.target.checked })}
                         />
                         resolve
+                        <span
+                          className="nginx-plus-badge"
+                          title="Nginx Plus: honours the DNS TTL and re-resolves without a reload. Open-source nginx parses `resolve` but only re-resolves at reload time, so the flag has limited value on OSS."
+                          style={{ marginLeft: '0.25rem' }}
+                        >
+                          Plus
+                        </span>
                       </label>
                       <button
                         type="button"
@@ -619,7 +1087,8 @@ export default function UpstreamsTab({ upstreams, servers = [], config, onUpdate
             })()}
           </div>
         )
-      })}
+      })
+      })()}
       {contextMenu && (() => {
         const ctxPos = findUpstreamIndex(config, contextMenu.up)
         return (

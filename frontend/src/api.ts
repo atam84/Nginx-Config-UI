@@ -98,13 +98,13 @@ export async function disableConfig(path: string): Promise<{ success: boolean; m
 }
 
 export async function fetchConfig(path: string): Promise<ConfigFile> {
-  const res = await apiFetch(`${API_BASE}/api/config/${path}`)
+  const res = await apiFetch(`${API_BASE}/api/config-file?path=${encodeURIComponent(path)}`)
   if (!res.ok) throw new Error('Failed to fetch config')
   return res.json()
 }
 
 export async function saveConfig(path: string, cfg: ConfigFile): Promise<{ success: boolean; message?: string }> {
-  const res = await apiFetch(`${API_BASE}/api/config/${path}`, {
+  const res = await apiFetch(`${API_BASE}/api/config-file?path=${encodeURIComponent(path)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(cfg),
@@ -114,7 +114,7 @@ export async function saveConfig(path: string, cfg: ConfigFile): Promise<{ succe
 }
 
 export async function deleteConfig(path: string): Promise<{ success: boolean; message?: string }> {
-  const res = await apiFetch(`${API_BASE}/api/config/${path}`, { method: 'DELETE' })
+  const res = await apiFetch(`${API_BASE}/api/config-file?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
   const data = await res.json()
   return { ...data, success: res.ok }
 }
@@ -258,7 +258,7 @@ export async function fetchStreamServers(filename: string): Promise<{ servers: N
 // ─── History API ─────────────────────────────────────────────────────────────
 
 export async function fetchConfigHistory(path: string): Promise<{ ts: number; size: number }[]> {
-  const res = await apiFetch(`${API_BASE}/api/config/history/${path}`)
+  const res = await apiFetch(`${API_BASE}/api/config/history?path=${encodeURIComponent(path)}`)
   if (!res.ok) throw new Error('Failed to fetch history')
   return res.json()
 }
@@ -395,5 +395,64 @@ export async function parseConfigFromText(text: string): Promise<ConfigFile> {
     const data = await res.json().catch(() => ({})) as { error?: string }
     throw new Error(data.error ?? 'Failed to parse config')
   }
+  return res.json()
+}
+
+// ── §53 — Topology aggregation (Published Endpoints / Outbound Dependencies) ──
+
+export interface PublishedEndpoint {
+  server_name: string
+  all_names: string[]
+  port: string
+  address: string
+  path: string
+  ssl: boolean
+  http2: boolean
+  http3: boolean
+  backend: string
+  backend_kind: string
+  return_code?: string
+  enabled: boolean
+  file_path: string
+  line_number: number
+}
+
+export interface OutboundDependency {
+  kind: string
+  target: string
+  target_kind: string
+  host: string
+  port: string
+  upstream_name?: string
+  uses_dns: boolean
+  uses_tls: boolean
+  resolver_in_scope: boolean
+  resolver_missing: boolean
+  server_name: string
+  path: string
+  file_path: string
+  line_number: number
+}
+
+export interface TopologyEndpointsResponse {
+  endpoints: PublishedEndpoint[]
+  warnings: string[]
+}
+
+export interface TopologyOutboundResponse {
+  outbound: OutboundDependency[]
+  upstreams: Record<string, string[]>
+  warnings: string[]
+}
+
+export async function fetchPublishedEndpoints(): Promise<TopologyEndpointsResponse> {
+  const res = await apiFetch(`${API_BASE}/api/topology/endpoints`)
+  if (!res.ok) throw new Error('Failed to fetch published endpoints')
+  return res.json()
+}
+
+export async function fetchOutboundDependencies(): Promise<TopologyOutboundResponse> {
+  const res = await apiFetch(`${API_BASE}/api/topology/outbound`)
+  if (!res.ok) throw new Error('Failed to fetch outbound dependencies')
   return res.json()
 }

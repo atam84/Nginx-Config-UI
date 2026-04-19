@@ -1,0 +1,118 @@
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.confirm-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 440px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.confirm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.9rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.confirm-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.confirm-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.3rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.confirm-close:hover {
+  color: var(--text);
+}
+
+.confirm-body {
+  padding: 1.1rem 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.confirm-body code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  padding: 0.1rem 0.3rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.confirm-body input[type='text'],
+.confirm-body input[type='url'] {
+  width: 100%;
+  margin-top: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  font-family: inherit;
+  font-size: 0.9rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  padding: 0.75rem 1.1rem;
+  border-top: 1px solid var(--border);
+}
+
+.confirm-actions button {
+  font-family: inherit;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.875rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.confirm-actions button:hover {
+  background: var(--bg-hover);
+}
+
+.confirm-actions .confirm-ok {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+.confirm-actions .confirm-ok.confirm-danger {
+  background: var(--error);
+  border-color: var(--error);
+  color: #fff;
+}
+
+.confirm-error {
+  margin-top: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--error);
+  border-radius: 5px;
+  color: var(--error);
+}

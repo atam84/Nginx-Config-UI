@@ -38,6 +38,30 @@ NGINX_CONFIG_ROOT=/etc/nginx NGINX_BIN=nginx NGINX_SERVICE=nginx ./nginx-config-
 NGINX_BACKUP_DIR=/backups ./nginx-config-ui
 ```
 
+#### Troubleshooting: `ENOSPC: System limit for number of file watchers reached`
+
+`npm run dev` (Vite) watches the full module graph, which typically exceeds
+Linux's default `inotify` ceiling of 8192. `vite build` is unaffected because
+it only reads files once. Raise the kernel limits on the host:
+
+```bash
+# Inspect current values
+cat /proc/sys/fs/inotify/max_user_watches /proc/sys/fs/inotify/max_user_instances
+
+# Raise for the current boot
+sudo sysctl -w fs.inotify.max_user_watches=524288
+sudo sysctl -w fs.inotify.max_user_instances=1024
+
+# Persist across reboots
+echo 'fs.inotify.max_user_watches=524288
+fs.inotify.max_user_instances=1024' | sudo tee /etc/sysctl.d/99-inotify.conf
+sudo sysctl --system
+```
+
+If you can't change host sysctls, fall back to polling by setting
+`CHOKIDAR_USEPOLLING=1 npm run dev` — slower and heavier on CPU, but it
+sidesteps `inotify` entirely.
+
 ### Authentication (single-user)
 
 Auth is configured via environment variables: `AUTH_USERNAME` and `AUTH_PASSWORD_HASH` (bcrypt). Set `AUTH_DISABLED=1` for dev.
@@ -51,6 +75,36 @@ Auth is configured via environment variables: `AUTH_USERNAME` and `AUTH_PASSWORD
 ```
 
 `scripts/reset-password.sh` uses `cmd/hashpw` (a tiny Go helper that reuses `internal/auth`). After updating the env file or systemd unit, restart the service.
+
+### Docker
+
+Two compose flavours, one image with two build targets:
+
+| Mode            | Compose file                     | What it does                                                                 |
+| :-------------- | :------------------------------- | :--------------------------------------------------------------------------- |
+| **Editor-only** | `docker-compose.editor.yml`      | Runs just the admin UI. `nginx -t` validation works; Reload is disabled.     |
+| **All-in-one**  | `docker-compose.all-in-one.yml`  | Admin UI + a running nginx in the same container, managed via `nginx -s reload`. |
+
+```bash
+# Editor only — useful as a scratchpad for authoring configs you copy out.
+docker compose -f docker-compose.editor.yml up --build
+# → http://localhost:8081
+
+# All-in-one — a real nginx plus the UI that manages it.
+docker compose -f docker-compose.all-in-one.yml up --build
+# → http://localhost:8081 (admin UI)
+# → http://localhost/     (nginx)
+```
+
+The reload strategy is selected by `NGINX_RELOAD_MODE`:
+- `systemctl` *(default)* — host-managed nginx on a VM, reload via `systemctl reload nginx`
+- `signal` — in-container nginx, reload via `nginx -s reload` + `pgrep nginx` for status
+- `disabled` — editor-only mode; Reload endpoints return an explanatory message
+
+For "manage an nginx already installed on the host" there's no docker-compose —
+install the Go binary as a systemd service on the host instead. Containerising
+that cleanly needs host dbus access or `--pid=host`, which is uglier than just
+using a native install.
 
 ### API Documentation
 

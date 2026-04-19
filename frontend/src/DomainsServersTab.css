@@ -386,6 +386,128 @@
   opacity: 0.9;
 }
 
+.locations-header-actions {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+/* §54.1 — orphan satisfy directive warning */
+.satisfy-orphan-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fcd34d;
+  font-size: 0.78rem;
+  font-family: monospace;
+}
+
+/* §54.4 — Nginx Plus badge within upstream health check section */
+.upstream-health-check-section {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 6px;
+  background: rgba(255, 163, 26, 0.04);
+  border: 1px solid rgba(255, 163, 26, 0.15);
+  border-left: 3px solid rgba(255, 163, 26, 0.6);
+}
+
+.upstream-health-check-section .uhc-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.upstream-health-check-section .uhc-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+.upstream-health-check-section .uhc-row label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.upstream-health-check-section input[type='text'],
+.upstream-health-check-section input[type='number'] {
+  font-family: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  width: 120px;
+}
+
+.upstream-health-check-section .uhc-short {
+  width: 80px !important;
+}
+
+.upstream-health-check-section .uhc-wide {
+  width: 220px !important;
+}
+
+/* §55.1 — proxy_next_upstream checkbox grid */
+.next-upstream-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.35rem 0.75rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.next-upstream-grid .checkbox-label {
+  font-size: 0.8rem;
+}
+
+.upstream-match-section {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  background: var(--bg-card);
+  border: 1px dashed var(--border);
+}
+
+.upstream-match-section .uhc-subhead {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-add-stub-status {
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-add-stub-status:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  opacity: 1;
+}
+
 .locations {
   margin-top: 0.75rem;
   padding-top: 0.75rem;
@@ -661,7 +783,7 @@
 }
 
 .return-row select {
-  width: 80px;
+  width: 92px;
   flex-shrink: 0;
   font-family: inherit;
   font-size: 0.875rem;
@@ -670,6 +792,175 @@
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 6px;
+}
+
+/* §50.1 — inline warning when ssl + quic coexist on a single listen row */
+.listen-warning {
+  margin-top: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  background: rgba(227, 160, 8, 0.12);
+  border: 1px solid var(--warning);
+  border-radius: 5px;
+  color: var(--text);
+}
+
+.listen-warning strong {
+  color: var(--warning);
+}
+
+.listen-warning code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.76rem;
+  padding: 0 0.25rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+/* §50.2 / §50.4 / §50.5 — HTTP/3 + QUIC toggles block */
+.http3-section {
+  padding: 0.6rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+}
+
+.http3-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 0.3rem;
+}
+
+.http3-toggles code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  padding: 0 0.2rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  margin-left: 0.15rem;
+}
+
+/* §48.1 / §48.3 — CORS preset button group */
+.cors-preset-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border);
+}
+
+.cors-preset-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-right: 0.25rem;
+}
+
+.btn-preset.btn-cors {
+  border-color: var(--accent-soft);
+}
+
+.btn-preset.btn-cors code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.7rem;
+  padding: 0 0.15rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  margin-left: 0.15rem;
+}
+
+/* §48.2 — preflight button is visually distinct (it's structurally different —
+   emits an `if` block, not add_header rows) and followed by an inline warning. */
+.btn-preset.btn-cors-preflight {
+  border-color: var(--warning);
+}
+
+.cors-preflight-warning {
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  background: rgba(227, 160, 8, 0.1);
+  border: 1px solid var(--warning);
+  border-radius: 5px;
+  color: var(--text);
+}
+
+.cors-preflight-warning strong {
+  color: var(--warning);
+}
+
+.cors-preflight-warning code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.7rem;
+  padding: 0 0.2rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+/* §47.2 — "Redirect all traffic to …" server-level helper */
+.redirect-all-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.4rem;
+  padding-left: 1.6rem;
+}
+
+.redirect-all-fields select {
+  flex-shrink: 0;
+  min-width: 11rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+}
+
+.redirect-all-fields input[type='text'] {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+}
+
+.redirect-all-warning {
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  background: rgba(227, 160, 8, 0.12);
+  border: 1px solid var(--warning);
+  border-radius: 5px;
+  color: var(--text);
+}
+
+.redirect-all-warning code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  padding: 0 0.25rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
 }
 
 /* F2.1 — rate limiting row */
@@ -983,4 +1274,151 @@
 
 .fcgi-use-stale-grid .checkbox-label {
   font-size: 0.8rem;
+}
+
+/* §44.1 — gRPC TLS sub-section */
+.grpc-ssl-subsection {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-hover);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.grpc-ssl-title {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.grpc-ssl-title code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  padding: 0 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+}
+
+/* §44.2 — gRPC HTTP/2 warning banner */
+.grpc-http2-warning {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.55rem 0.75rem;
+  margin: 0.5rem 0 1rem;
+  background: rgba(227, 160, 8, 0.12);
+  border: 1px solid var(--warning);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.grpc-http2-warning-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.grpc-http2-warning-text strong {
+  color: var(--warning);
+}
+
+.grpc-http2-warning-text code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.76rem;
+  padding: 0 0.3rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.grpc-http2-warning .btn-preset {
+  flex-shrink: 0;
+}
+
+/* §45.1 — root / alias conflict warning */
+.static-conflict-warning {
+  margin: 0.4rem 0 0.6rem;
+  padding: 0.5rem 0.65rem;
+  background: rgba(227, 160, 8, 0.12);
+  border: 1px solid var(--warning);
+  border-radius: 5px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.static-conflict-warning strong {
+  color: var(--warning);
+}
+
+.static-conflict-warning code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.74rem;
+  padding: 0 0.3rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+/* §45.2 — try_files reorderable rows */
+.try-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.try-files-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.try-files-row input {
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+}
+
+.try-files-move {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  min-width: 1.8rem;
+}
+
+.try-files-move:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.try-files-move:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* §45.4 — cache preset row sits under the expires input */
+.cache-preset-row {
+  margin-top: 0.3rem;
+}
+
+/* §45.5 — types {} row: mime-type + extensions + remove */
+.types-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.types-row input {
+  min-width: 0;
+  font-family: ui-monospace, monospace;
 }

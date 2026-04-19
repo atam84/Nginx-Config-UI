@@ -420,69 +420,20 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "Saved"})
 	})
 
-	// Get config file
-	r.GET("/api/config/*path", func(c *gin.Context) {
-		path := strings.TrimPrefix(c.Param("path"), "/")
-		if path == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "missing path"})
-			return
-		}
-		root := getConfigRoot()
-		safePath := paths.SanitizeConfigPath(root, path)
-		if safePath == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
-			return
-		}
-		cfg, err := parser.ParseFromFile(safePath)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		cfg.FilePath = path
-		cfg.Status = api.FileStatus(root, path)
-		c.JSON(http.StatusOK, cfg)
-	})
+	// NOTE: All specific /api/config/<name> routes MUST register BEFORE the
+	// catch-all /api/config/*path. Gin's radix router rejects a specific
+	// path segment if a catch-all wildcard already claims the prefix
+	// ("'/history' conflicts with existing wildcard '/*path'"). Earlier
+	// in this file you'll see /api/config/save-all, /api/config/create,
+	// /api/config/enable, /api/config/disable already satisfy this rule
+	// because they're declared in the first group; history/version/
+	// restore/search/resolve-include are declared here, still before the
+	// wildcard, for the same reason.
 
-	// Save config file
-	r.PUT("/api/config/*path", func(c *gin.Context) {
-		path := strings.TrimPrefix(c.Param("path"), "/")
-		if path == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "missing path"})
-			return
-		}
-		root := getConfigRoot()
-		safePath := paths.SanitizeConfigPath(root, path)
-		if safePath == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
-			return
-		}
-		var cfg model.ConfigFile
-		if err := c.ShouldBindJSON(&cfg); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		// Save history before overwriting
-		_ = api.SaveHistory(root, path)
-		if err := api.SaveConfig(sysCfg, root, path, &cfg); err != nil {
-			var ve *api.ValidationError
-			if errors.As(err, &ve) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": ve.Error(), "output": ve.Output})
-				return
-			}
-			var se *security.ConfigValidationError
-			if errors.As(err, &se) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": se.Error()})
-				return
-			}
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": "Saved"})
-	})
-
-	// List history versions for a config file
-	r.GET("/api/config/history/*path", func(c *gin.Context) {
-		path := strings.TrimPrefix(c.Param("path"), "/")
+	// List history versions for a config file. Uses ?path= query param
+	// (not a wildcard) to avoid a second catch-all under /api/config/.
+	r.GET("/api/config/history", func(c *gin.Context) {
+		path := strings.TrimPrefix(c.Query("path"), "/")
 		if path == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing path"})
 			return
@@ -530,9 +481,7 @@ func main() {
 			return
 		}
 		root := getConfigRoot()
-		// Save current as history first
 		_ = api.SaveHistory(root, req.Path)
-		// Get the backup version
 		data, err := api.GetHistoryVersion(root, req.Path, req.Ts)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "version not found"})
@@ -583,9 +532,91 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"files": matches})
 	})
 
+	// §53.5 — Topology aggregations: Published Endpoints & Outbound Dependencies
+	r.GET("/api/topology/endpoints", func(c *gin.Context) {
+		root := getConfigRoot()
+		files, err := api.ListConfigFiles(root)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, api.CollectPublishedEndpoints(root, files))
+	})
+	r.GET("/api/topology/outbound", func(c *gin.Context) {
+		root := getConfigRoot()
+		files, err := api.ListConfigFiles(root)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, api.CollectOutboundDependencies(root, files))
+	})
+
+	// Get config file. Uses ?path= query param (the natural choice for
+	// Gin's radix router, which doesn't allow a catch-all wildcard to
+	// coexist with specific path segments at the same prefix).
+	r.GET("/api/config-file", func(c *gin.Context) {
+		path := strings.TrimPrefix(c.Query("path"), "/")
+		if path == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing path"})
+			return
+		}
+		root := getConfigRoot()
+		safePath := paths.SanitizeConfigPath(root, path)
+		if safePath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+			return
+		}
+		cfg, err := parser.ParseFromFile(safePath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.FilePath = path
+		cfg.Status = api.FileStatus(root, path)
+		c.JSON(http.StatusOK, cfg)
+	})
+
+	// Save config file
+	r.PUT("/api/config-file", func(c *gin.Context) {
+		path := strings.TrimPrefix(c.Query("path"), "/")
+		if path == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing path"})
+			return
+		}
+		root := getConfigRoot()
+		safePath := paths.SanitizeConfigPath(root, path)
+		if safePath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+			return
+		}
+		var cfg model.ConfigFile
+		if err := c.ShouldBindJSON(&cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// Save history before overwriting
+		_ = api.SaveHistory(root, path)
+		if err := api.SaveConfig(sysCfg, root, path, &cfg); err != nil {
+			var ve *api.ValidationError
+			if errors.As(err, &ve) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": ve.Error(), "output": ve.Output})
+				return
+			}
+			var se *security.ConfigValidationError
+			if errors.As(err, &se) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": se.Error()})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "Saved"})
+	})
+
 	// Delete config file
-	r.DELETE("/api/config/*path", func(c *gin.Context) {
-		path := strings.TrimPrefix(c.Param("path"), "/")
+	r.DELETE("/api/config-file", func(c *gin.Context) {
+		path := strings.TrimPrefix(c.Query("path"), "/")
 		if path == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing path"})
 			return

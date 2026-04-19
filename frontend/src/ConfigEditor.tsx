@@ -30,15 +30,17 @@ import DomainsServersTab from './DomainsServersTab'
 import StreamTab from './StreamTab'
 import MailTab from './MailTab'
 import TopologyTab from './TopologyTab'
+import IngressEgressTab from './IngressEgressTab'
 import RawEditorTab from './RawEditorTab'
 import HistoryModal from './HistoryModal'
 import SearchPanel from './SearchPanel'
 import NewProxyWizard from './NewProxyWizard'
 import DiffModal from './DiffModal'
 import ErrorModal, { parseNginxError, type ErrorDetails } from './ErrorModal'
+import ConfirmModal from './ConfirmModal'
 import './ConfigEditor.css'
 
-type TabId = 'global' | 'http' | 'upstreams' | 'proxy' | 'stream' | 'mail' | 'topology' | 'raw'
+type TabId = 'global' | 'http' | 'upstreams' | 'proxy' | 'stream' | 'mail' | 'topology' | 'ingress' | 'raw'
 type SourceMode = 'local' | 'file' | 'new'
 
 let _nidSeq = 0
@@ -150,6 +152,7 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
   const [wizardDestination, setWizardDestination] = useState<string | undefined>(undefined)
   const [showDiff, setShowDiff] = useState(false)
   const [fileMenu, setFileMenu] = useState<{ file: string; status?: string; x: number; y: number } | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [globalBusy, setGlobalBusy] = useState<string | null>(null)
   const [syntaxOk, setSyntaxOk] = useState<string | null>(null)
   const [configRoot, setConfigRootValue] = useState('')
@@ -647,11 +650,17 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
     }
   }
 
-  const handleFileDelete = async () => {
+  const handleFileDelete = () => {
     if (!fileMenu) return
     const f = fileMenu.file
     setFileMenu(null)
-    if (!confirm(`Delete ${f}?`)) return
+    setPendingDelete(f)
+  }
+
+  const confirmFileDelete = async () => {
+    const f = pendingDelete
+    setPendingDelete(null)
+    if (!f) return
     try {
       const res = await deleteConfig(f)
       if (res.success) {
@@ -1168,6 +1177,13 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
                   Topology
                 </button>
                 <button
+                  className={tab === 'ingress' ? 'active' : ''}
+                  onClick={() => setTab('ingress')}
+                  title="Aggregated Published Endpoints + Outbound Dependencies across all config files"
+                >
+                  Ingress / Egress
+                </button>
+                <button
                   className={tab === 'raw' ? 'active' : ''}
                   onClick={() => setTab('raw')}
                 >
@@ -1243,6 +1259,9 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
                   config={config}
                   onNavigate={(newTab) => setTab(newTab as TabId)}
                 />
+              )}
+              {tab === 'ingress' && (
+                <IngressEgressTab />
               )}
               {tab === 'raw' && (
                 <RawEditorTab
@@ -1381,6 +1400,17 @@ export default function ConfigEditor({ readOnly = false }: ConfigEditorProps) {
 
       {error && (
         <ErrorModal error={error} onDismiss={() => setError(null)} />
+      )}
+
+      {pendingDelete && (
+        <ConfirmModal
+          title="Delete config file"
+          danger
+          confirmLabel="Delete"
+          message={<>Permanently delete <code>{pendingDelete}</code>? This action cannot be undone.</>}
+          onConfirm={confirmFileDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
       )}
     </div>
   )
